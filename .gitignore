@@ -1,0 +1,48 @@
+# Restrictive ignore: keep only core code files
+
+# 1) Ignore everything by default
+*
+
+# 2) Allow directory traversal
+!*/
+
+# 3) Keep core code and docs
+!.gitignore
+!README*.md
+!*.py
+!*.ipynb
+!*.tex
+
+# 4) Exclude known large/generated artifacts even if patterns above match
+Datasets/
+visualizations/
+pytorch-mask-r-cnn-bird-nest/
+pytorch-mask-r-cnn-training-windows.ipynb
+bird_nest_report.ipynb
+*.pth
+*.ttf
+*.pdf
+
+# Python caches
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+pip-wheel-metadata/
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
+
+# OS noise
+.DS_Store
+Thumbs.db
+
+# Logs / temp
+*.log
+*.out
+*.tmp
+*.cache
