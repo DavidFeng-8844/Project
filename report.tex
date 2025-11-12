@@ -76,13 +76,14 @@ Mask R-CNN-based instance segmentation is widely used for infrastructure inspect
 
 \section{Experimental Setup}
 \begin{itemize}[leftmargin=*]
-  \item Hardware: RTX 3060 Laptop GPU (local), with target cloud migration.
-  \item Software: PyTorch, TorchVision, pycocotools, Jupyter; custom utilities for COCO loading and visualization.
-  \item Train/Val split: 80/20 across all images (positives and negatives).
+  \item \textbf{Hardware}: NVIDIA GeForce RTX 3060 Laptop GPU (6\,GB VRAM), AMD Ryzen mobile CPU, 16\,GB RAM, NVMe SSD, Windows 11. During training the GPU memory stabilized around 4.2/6\,GB, CPU utilization peaked at ~40\%.
+  \item \textbf{Software}: PyTorch 2.x, TorchVision 0.16 (with AMP and \texttt{cudnn.benchmark}), pycocotools, Jupyter, and custom COCO utilities for data loading and visualization.
+  \item \textbf{Dataset}: 54 COCO images (43 train / 11 validation). All samples are patrol photographs of bird nests (positives) and empty power lines (negatives) from the same acquisition batch.
+  \item \textbf{Training Config}: Input size 512$\times$512, batch size 4, AdamW ($\text{lr}=5\cdot 10^{-4}$), OneCycleLR for 40 epochs. Random IoU crop (trials=50), color/grayscale/equalize/posterize/horizontal-flip augmentations. On Windows the script is refactored into a \texttt{main()} entry point; DataLoader parallelism controlled via \texttt{NUM\_WORKERS} (default 2) with \texttt{persistent\_workers} and \texttt{prefetch\_factor}=2.
 \end{itemize}
 
 \section{Preliminary Results}
-Using run folder \texttt{pytorch-mask-r-cnn-bird-nest/2025-11-10\_16-06-00}:
+Unless otherwise noted, the following statistics are from the run directory \texttt{pytorch-mask-r-cnn-bird-nest/2025-11-12\_17-37-45}.
 
 \subsection{COCO Metrics (Validation)}
 \begin{center}
@@ -99,6 +100,14 @@ AR@[0.50:0.95] & \(0.837\) & \(0.828\) \\
 \end{center}
 \textit{Interpretation}: High AP50/AP75 indicate accurate localization and mask quality; strong AR suggests low miss rate on the validation set.
 
+\subsection{Training Dynamics and Observations}
+\begin{itemize}[leftmargin=*]
+\item \textbf{Loss Curve}: \texttt{train\_loss} drops from 1.41 to 0.14 while \texttt{valid\_loss} decreases from 0.65 to 0.19; both plateau around epoch 20 (see Fig.~\ref{fig:loss}). Early stopping could be triggered near \texttt{valid\_loss}$\approx 0.22$.
+\item \textbf{GPU Utilization Improvements}: Initially the single-thread DataLoader caused oscillating GPU load (0\%/99\%). After refactoring into \texttt{main()}, setting \texttt{NUM\_WORKERS=2}, and enabling \texttt{persistent\_workers}/\texttt{pin\_memory}, the GPU stays at 70--85\% utilization.
+\item \textbf{Memory \& I/O}: Reducing IoU crop trials from 100 to 50, combined with cuDNN autotuning and SSD storage, yields $\sim$50--60 seconds per epoch.
+\item \textbf{Overfitting Risk}: Validation distribution mirrors the training domain; the model nearly replicates annotations (AP50=1.0, most IoUs in 0.9--1.0). Broader generalization requires new lines/seasons/backgrounds.
+\end{itemize}
+
 \subsection{Qualitative Examples}
 \begin{figure}[h]
   \centering
@@ -106,12 +115,21 @@ AR@[0.50:0.95] & \(0.837\) & \(0.828\) \\
   \caption{GT (left, green) vs Prediction (right, red). Additional samples: see \texttt{visualizations/}.}
 \end{figure}
 
-\subsection{Training Dynamics}
+\subsection{Online Inference Spot Checks}
+\begin{itemize}[leftmargin=*]
+  \item After deploying the trained model to the Flask inference service, we sampled several patrol photos that were never seen during validation; the detector consistently segmented bird nests and aligned bounding boxes with the actual locations, indicating encouraging generalization.
+  \item Incoming production images span a wide range of resolutions (\(\leq 21\,\mathrm{MP}\)). We rescale them before inference and restore the coordinates proportionally during post-processing; once this fix is applied, front-end overlays match the offline evaluation view.
+  \item Differences in season, lighting, or background between deployment scenarios and the curated dataset remain a concern. We plan to expand the corpus—especially hard negatives and heavy occlusion cases—to further harden robustness.
+\end{itemize}
+
+\subsection{Loss Curves and Performance Profiles}
 \begin{figure}[h]
   \centering
   \includegraphics[width=0.95\textwidth]{visualizations/loss_curves.png}
-  \caption{Training vs Validation Loss (exported from report notebook). Steady downward trends indicate healthy optimization.}
+  % \caption{Train/Validation loss for run 2025-11-12\_17-37-45. Early epochs plummeted 20 epochs after which the loss stabilized。}\label{fig:loss}
 \end{figure}
+
+\noindent\textbf{Score Threshold Sweeps:} Fig.~\ref{fig:threshold} shows precision/recall/F1 vs confidence threshold (IoU$\ge$0.5). Precision stays near 1.0 within 0.4--0.6; an operating threshold of 0.4--0.5 balances recall and false positives.
 
 \subsection{Precision-Recall and IoU Distributions}
 \begin{figure}[h]
@@ -141,7 +159,7 @@ AR@[0.50:0.95] & \(0.837\) & \(0.828\) \\
 \begin{figure}[h]
   \centering
   \includegraphics[width=0.95\textwidth]{visualizations/threshold_sweep_bbox.png}
-  \caption{Score Threshold vs Precision/Recall/F1 for bbox at IoU$\ge$0.5. Useful for selecting an operating threshold.}
+  \caption{Score Threshold vs Precision/Recall/F1 for bbox at IoU$\ge$0.5. Operating points 0.4--0.5 offer the best trade-off.}\label{fig:threshold}
 \end{figure}
 
 \paragraph{Note on Figures.}
