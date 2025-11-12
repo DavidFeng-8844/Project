@@ -12,6 +12,7 @@
 !*.py
 !*.ipynb
 !*.tex
+!*.pdf
 
 # 4) Exclude known large/generated artifacts even if patterns above match
 Datasets/
