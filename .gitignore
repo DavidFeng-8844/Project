@@ -21,7 +21,6 @@ pytorch-mask-r-cnn-training-windows.ipynb
 bird_nest_report.ipynb
 *.pth
 *.ttf
-*.pdf
 
 # Python caches
 __pycache__/
