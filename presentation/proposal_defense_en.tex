@@ -171,17 +171,17 @@ AR@[0.50:0.95] & 0.837 & 0.828 \\
 \centering
 \includegraphics[width=0.95\textwidth]{../visualizations/pr_curve_bbox_ap50.png}
 \vspace{-5pt}
-\captionof{figure}{PR Curve (Bbox, IoU=0.50)}
+\captionof{figure}{PR Curves (Bbox, IoU=0.50/0.75/0.90)}
 
 \column{0.48\linewidth}
 \centering
 \includegraphics[width=0.95\textwidth]{../visualizations/pr_curve_segm_ap50.png}
 \vspace{-5pt}
-\captionof{figure}{PR Curve (Segm, IoU=0.50)}
+\captionof{figure}{PR Curves (Segm, IoU=0.50/0.75/0.90)}
 \end{columns}
 \vspace{2pt}
 \small
-\textit{Nearly horizontal precision near 1.0 indicates very few false positives.}
+\textit{IoU=0.50 stays close to precision 1.0; IoU=0.75 settles around 0.93, while IoU=0.90 dips toward 0.70, showing localization sensitivity.}
 \end{frame}
 
 %------------------------------------------------
