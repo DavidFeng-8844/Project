@@ -167,6 +167,31 @@ class MaskRCNNService:
         return predictions, masks_tv, boxes_tv
 
     def _annotate(self, image: Image.Image, predictions: list[dict], masks: Mask | None, boxes: BoundingBoxes | None):
+        # Limit image size to prevent memory issues (max 2048px on longest side)
+        MAX_DISPLAY_SIZE = 2048
+        original_size = image.size
+        scale_factor = 1.0
+        
+        if max(original_size) > MAX_DISPLAY_SIZE:
+            scale_factor = MAX_DISPLAY_SIZE / max(original_size)
+            new_size = (int(original_size[0] * scale_factor), int(original_size[1] * scale_factor))
+            image = image.resize(new_size, Image.Resampling.LANCZOS)
+            # Scale boxes and masks if they exist
+            if boxes is not None and len(boxes) > 0:
+                boxes = BoundingBoxes(
+                    boxes.data * scale_factor,
+                    format=boxes.format,
+                    canvas_size=(new_size[1], new_size[0])
+                )
+            if masks is not None and len(masks) > 0:
+                # Resize masks
+                masks_resized = F.interpolate(
+                    masks.data.unsqueeze(0).float(),
+                    size=(new_size[1], new_size[0]),
+                    mode='nearest'
+                ).squeeze(0).bool()
+                masks = Mask(masks_resized)
+        
         # Convert PIL image to tensor
         img_tensor = transforms.PILToTensor()(image)
         
@@ -212,9 +237,23 @@ class MaskRCNNService:
         return annotated
 
     @staticmethod
-    def encode_image_to_base64(image: Image.Image) -> str:
+    def encode_image_to_base64(image: Image.Image, max_size: int = 2048, quality: int = 85) -> str:
+        """Encode image to base64 with size optimization."""
+        # Resize if too large
+        if max(image.size) > max_size:
+            scale = max_size / max(image.size)
+            new_size = (int(image.size[0] * scale), int(image.size[1] * scale))
+            image = image.resize(new_size, Image.Resampling.LANCZOS)
+        
         buffer = io.BytesIO()
-        image.save(buffer, format="PNG")
+        # Use JPEG for better compression if image doesn't have transparency
+        if image.mode in ('RGBA', 'LA', 'P'):
+            image.save(buffer, format="PNG", optimize=True)
+        else:
+            # Convert to RGB if needed and save as JPEG
+            if image.mode != 'RGB':
+                image = image.convert('RGB')
+            image.save(buffer, format="JPEG", quality=quality, optimize=True)
         return base64.b64encode(buffer.getvalue()).decode("utf-8")
 
 

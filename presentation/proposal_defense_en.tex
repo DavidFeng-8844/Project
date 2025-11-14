@@ -199,39 +199,53 @@ AR@[0.50:0.95] & 0.837 & 0.828 \\
 \centering
 \includegraphics[width=0.85\textwidth]{../visualizations/threshold_sweep_bbox.png}
 \vspace{-5pt}
-\captionof{figure}{Score Threshold vs P/R/F1}
+\captionof{figure}{Score Threshold vs P/R/F1 (IoU$\geq$0.5)}
 \end{columns}
 \vspace{2pt}
 \small
-\textit{Right-skewed IoU mass indicates strong localization. Operating threshold 0.4--0.5 balances recall and false positives.}
+\textit{Right-skewed IoU mass indicates strong localization. With AP$_{50}$=1.0, precision remains high across thresholds; threshold 0.4--0.5 optimizes F1, while higher thresholds (0.6--0.8) maintain high precision with reduced recall.}
 \end{frame}
 
 %------------------------------------------------
 \begin{frame}
-\frametitle{PoC Progress (5): Microservice-based Deployment}
+\frametitle{PoC Progress (5): Production-Ready Microservice}
 \vspace{-5pt}
-\begin{columns}
-\column{0.45\linewidth}
-\textbf{Flask REST API}
+\begin{columns}[T]
+\column{0.48\linewidth}
+\textbf{Flask REST API Features}
 \begin{itemize}
-  \item Accepts image upload
-  \item Returns JSON (bbox, masks, scores)
-  \item Returns annotated PNG
-  \item Configurable confidence threshold
+  \item Batch image upload (multiple files)
+  \item Real-time inference with visualization
+  \item Interactive web interface
+  \item Download results (single \& ZIP)
+  \item Statistical dashboards \& charts
+  \item Memory-optimized for large images
 \end{itemize}
 
-\column{0.45\linewidth}
-\textbf{Significance}
+\column{0.48\linewidth}
+\textbf{Platform Significance}
 \begin{itemize}
   \item Demonstrates ``model as a service''
   \item First entry in AI model registry
-  \item Enables integration with alert center
-  \item Ready for multi-tenant SaaS backend
+  \item Production-ready with error handling
+  \item Scalable architecture for multi-tenant SaaS
+  \item User-friendly interface for field operators
 \end{itemize}
 \end{columns}
-\vspace{5pt}
+\vspace{8pt}
+\begin{columns}[T]
+\column{0.48\linewidth}
 \centering
-\includegraphics[width=0.55\textwidth,height=0.45\textheight,keepaspectratio]{flask-deploy-image.png}
+\includegraphics[width=0.95\textwidth,height=0.32\textheight,keepaspectratio]{flask-deploy-image.png}
+\vspace{-3pt}
+\captionof{figure}{Multiple Images Detection}
+
+\column{0.48\linewidth}
+\centering
+\includegraphics[width=0.95\textwidth,height=0.32\textheight,keepaspectratio]{flask-deploy-image1.png}
+\vspace{-3pt}
+\captionof{figure}{Real-time Inference \& Visualization}
+\end{columns}
 \end{frame}
 
 %------------------------------------------------
