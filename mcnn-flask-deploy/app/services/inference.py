@@ -7,12 +7,15 @@ from pathlib import Path
 from typing import Sequence
 
 import torch
+import torch.nn.functional as F
 import torchvision.transforms.v2 as transforms
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageFont
 from torchvision.models.detection import maskrcnn_resnet50_fpn_v2
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 from torchvision.models.detection.mask_rcnn import MaskRCNNPredictor
 from torchvision.ops import nms
+from torchvision.utils import draw_segmentation_masks, draw_bounding_boxes
+from torchvision.tv_tensors import Mask, BoundingBoxes
 
 
 class MaskRCNNService:
@@ -90,8 +93,8 @@ class MaskRCNNService:
         with torch.no_grad():
             outputs = self.model(tensor)
         threshold = confidence if confidence is not None else self.confidence
-        predictions = self._postprocess(outputs, threshold, original_size=image.size)
-        annotated_image = self._annotate(image, predictions)
+        predictions, masks, boxes = self._postprocess(outputs, threshold, original_size=image.size)
+        annotated_image = self._annotate(image, predictions, masks, boxes)
         return predictions, annotated_image
 
     def _postprocess(self, outputs, threshold: float, original_size: tuple[int, int]):
@@ -100,27 +103,54 @@ class MaskRCNNService:
         keep = scores >= threshold
 
         if keep.sum() == 0:
-            return []
+            return [], None, None
 
         boxes = out["boxes"][keep].detach().cpu()
         labels = out["labels"][keep].detach().cpu()
         scores = scores[keep]
+        masks = out["masks"][keep].detach().cpu()
 
         keep_idx = nms(boxes, scores, iou_threshold=0.5)
         boxes = boxes[keep_idx]
         labels = labels[keep_idx]
         scores = scores[keep_idx]
+        masks = masks[keep_idx]
 
         orig_width, orig_height = original_size
         scale_x = orig_width / self.target_size
         scale_y = orig_height / self.target_size
 
-        boxes = boxes.clone()
-        boxes[:, [0, 2]] *= scale_x
-        boxes[:, [1, 3]] *= scale_y
+        # Scale boxes to original image size
+        boxes_scaled = boxes.clone()
+        boxes_scaled[:, [0, 2]] *= scale_x
+        boxes_scaled[:, [1, 3]] *= scale_y
+
+        # Scale masks to original image size
+        if masks.numel() > 0:
+            masks_scaled = F.interpolate(
+                masks,
+                size=(orig_height, orig_width),
+                mode='bilinear',
+                align_corners=False
+            )
+            # Apply sigmoid if needed (some torchvision versions output logits)
+            if masks_scaled.max().item() > 1.0 or masks_scaled.min().item() < 0.0:
+                masks_scaled = masks_scaled.sigmoid()
+            # Convert to boolean masks (threshold at 0.5)
+            masks_bool = torch.where(masks_scaled.squeeze(1) >= 0.5, True, False)
+            masks_tv = Mask(masks_bool)
+        else:
+            masks_tv = None
+
+        # Create BoundingBoxes tensor
+        boxes_tv = BoundingBoxes(
+            boxes_scaled,
+            format='xyxy',
+            canvas_size=(orig_height, orig_width)
+        )
 
         predictions = []
-        for box, label, score in zip(boxes, labels, scores):
+        for box, label, score in zip(boxes_scaled, labels, scores):
             label_idx = int(label.item())
             label_name = (
                 self.class_names[label_idx]
@@ -134,22 +164,51 @@ class MaskRCNNService:
                     "bbox": [round(float(coord), 2) for coord in box.tolist()],
                 }
             )
-        return predictions
+        return predictions, masks_tv, boxes_tv
 
-    def _annotate(self, image: Image.Image, predictions: list[dict]):
-        annotated = image.copy()
-        draw = ImageDraw.Draw(annotated, mode="RGBA")
-        for pred in predictions:
-            bbox = pred["bbox"]
-            label = pred["label"]
-            score = pred["score"]
-            color = self.color_map.get(label, (46, 204, 113))
-            x1, y1, x2, y2 = bbox
-            draw.rectangle([x1, y1, x2, y2], outline=color, width=3)
-            text = f"{label} ({score:.2f})"
-            text_size = draw.textbbox((x1, y1), text, font=self.font)
-            draw.rectangle(text_size, fill=(*color, 160))
-            draw.text((x1 + 2, y1 + 2), text, fill=(255, 255, 255), font=self.font)
+    def _annotate(self, image: Image.Image, predictions: list[dict], masks: Mask | None, boxes: BoundingBoxes | None):
+        # Convert PIL image to tensor
+        img_tensor = transforms.PILToTensor()(image)
+        
+        # Draw masks first (red segmentation regions)
+        if masks is not None and len(masks) > 0:
+            # Get colors for each prediction
+            colors = []
+            for pred in predictions:
+                label = pred["label"]
+                color = self.color_map.get(label, (220, 20, 60))  # Default to red for bird_nest
+                colors.append(color)
+            
+            # Draw segmentation masks with transparency
+            img_tensor = draw_segmentation_masks(
+                image=img_tensor,
+                masks=masks,
+                alpha=0.3,
+                colors=colors
+            )
+        
+        # Draw bounding boxes and labels
+        if boxes is not None and len(boxes) > 0:
+            labels_with_scores = [
+                f"{pred['label']} ({pred['score']:.2f})"
+                for pred in predictions
+            ]
+            colors = [
+                self.color_map.get(pred["label"], (220, 20, 60))
+                for pred in predictions
+            ]
+            
+            img_tensor = draw_bounding_boxes(
+                image=img_tensor,
+                boxes=boxes,
+                labels=labels_with_scores,
+                colors=colors,
+                fill=False,
+                width=2
+            )
+        
+        # Convert tensor back to PIL Image
+        annotated = transforms.ToPILImage()(img_tensor)
         return annotated
 
     @staticmethod
