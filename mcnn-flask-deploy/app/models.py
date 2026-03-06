@@ -16,6 +16,9 @@ class User(db.Model):
     role = db.Column(db.String(16), nullable=False, default="User")
 
     inference_tasks = db.relationship("InferenceTask", back_populates="user", lazy=True)
+    inference_reports = db.relationship(
+        "InferenceReport", back_populates="user", lazy=True
+    )
 
 
 class AIModel(db.Model):
@@ -43,3 +46,16 @@ class InferenceTask(db.Model):
 
     user = db.relationship("User", back_populates="inference_tasks")
     model = db.relationship("AIModel", back_populates="inference_tasks")
+
+
+class InferenceReport(db.Model):
+    __tablename__ = "inference_reports"
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    model_name = db.Column(db.String(128), nullable=False)
+    summary = db.Column(db.Text, nullable=False)
+    detail_json = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    user = db.relationship("User", back_populates="inference_reports")

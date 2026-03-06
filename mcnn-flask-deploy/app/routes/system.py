@@ -14,6 +14,15 @@ def index():
     )
 
 
+@system_bp.get("/history")
+def history_page():
+    return render_template(
+        "history.html",
+        current_user=session.get("username", "Guest"),
+        current_role=session.get("role", "Anonymous"),
+    )
+
+
 @system_bp.get("/health")
 def health():
     return jsonify({"status": "ok"})
