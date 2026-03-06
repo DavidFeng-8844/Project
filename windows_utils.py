@@ -222,7 +222,10 @@ class COCODataset(Dataset):
         """
         # Get image file path - try to find the image in the image_dir
         # First try the filename from JSON, then try just the filename
-        file_name = Path(img_info['file_name']).name
+        # Handle both Windows (\) and Unix (/) path separators
+        file_name_raw = img_info['file_name']
+        # Normalize path separators and get just the filename
+        file_name = Path(file_name_raw.replace('\\', '/')).name
         filepath = self._image_dir / file_name
         
         # If file doesn't exist, try to find it with different extensions

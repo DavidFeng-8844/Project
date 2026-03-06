@@ -13,37 +13,37 @@ start_date = datetime(2025, 11, 1)
 # Define tasks with week numbers
 tasks = [
     {
-        'name': 'PoC Implementation (Module A: Bird Nest)',
+        'name': 'Phase 1: Preparation & Lit. Review',
         'start_week': 1,
         'end_week': 4,
         'status': 'completed',
-        'color': '#2ecc71'  # Green for completed
+        'color': '#2ecc71'
     },
     {
-        'name': 'Track 1: SaaS Platform Build (RBAC, Model Registry)',
+        'name': 'Phase 2: SaaS Arch & Pipelines',
         'start_week': 5,
-        'end_week': 10,
-        'status': 'planned',
-        'color': '#3498db'  # Blue for planned
-    },
-    {
-        'name': 'Track 2a: Module B (Oil Leak Detection)',
-        'start_week': 11,
-        'end_week': 15,
+        'end_week': 9,
         'status': 'planned',
         'color': '#3498db'
     },
     {
-        'name': 'Track 2b: Module C (Infrared High-Temperature)',
-        'start_week': 16,
-        'end_week': 18,
+        'name': 'Phase 3: Model Dev & Integration',
+        'start_week': 10,
+        'end_week': 16,
         'status': 'planned',
         'color': '#3498db'
     },
     {
-        'name': 'Final Integration & Report',
-        'start_week': 19,
+        'name': 'Phase 4: Validation & Optimization',
+        'start_week': 17,
         'end_week': 20,
+        'status': 'planned',
+        'color': '#3498db'
+    },
+    {
+        'name': 'Phase 5: Dissertation & Defence',
+        'start_week': 21,
+        'end_week': 26,
         'status': 'planned',
         'color': '#3498db'
     }
@@ -91,14 +91,19 @@ plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha='right', fontsize=9)
 
 # Set x-axis limits (from week 1 to week 21)
 min_date = week_to_date(1)
-max_date = week_to_date(21)
+max_date = week_to_date(27)
 ax.set_xlim(min_date, max_date)
 
 # Add grid
 ax.grid(axis='x', alpha=0.3, linestyle='--', linewidth=0.8)
 
-# Add vertical line at current week (week 4 completed)
-current_date = week_to_date(4.5)
+# Add vertical line at current date
+current_date = datetime.now()
+if current_date < start_date:
+    current_date = start_date  # Fallback if before start
+elif current_date > max_date:
+    current_date = max_date    # Fallback if after end
+
 ax.axvline(x=current_date, color='red', linestyle='--', linewidth=2, alpha=0.7)
 ax.text(current_date, len(tasks)-0.2, 'Current', rotation=90, ha='right', va='bottom', 
         fontsize=9, color='red', fontweight='bold')

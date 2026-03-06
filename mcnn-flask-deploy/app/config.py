@@ -8,7 +8,13 @@ class DefaultConfig:
     """Default configuration for the inference service."""
 
     BASE_DIR: Path = Path(__file__).resolve().parent.parent
+    PROJECT_ROOT: Path = BASE_DIR.parent
     CHECKPOINT_DIR: Path = BASE_DIR / "checkpoints"
+    DB_PATH: Path = PROJECT_ROOT / "mcnn_saas.db"
+
+    SQLALCHEMY_DATABASE_URI: str = os.getenv("DATABASE_URL", f"sqlite:///{DB_PATH}")
+    SQLALCHEMY_TRACK_MODIFICATIONS: bool = False
+    SECRET_KEY: str = os.getenv("SECRET_KEY", "mvp-dev-secret-key")
 
     MODEL_PATH: str = os.getenv(
         "MODEL_PATH",
