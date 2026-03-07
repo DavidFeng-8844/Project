@@ -50,6 +50,14 @@ def seed_models() -> None:
             "status": "Active",
             "weights_path": "checkpoints/oil_leak_yolov8.pt",
         },
+        {
+            "name": "Infrared Hotspot Detection",
+            "type": "Infrared",
+            "status": "Active",
+            # Infrared hybrid branch is rule-based (OCR + pixel mapping).
+            # Keep a placeholder path to satisfy schema constraints.
+            "weights_path": "checkpoints/infrared_hybrid.rule",
+        },
     ]
 
     for model_data in models_to_seed:
