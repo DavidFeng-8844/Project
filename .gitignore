@@ -15,11 +15,12 @@
 !*.pdf
 
 # 4) Exclude known large/generated artifacts even if patterns above match
-Datasets/
-visualizations/
-pytorch-mask-r-cnn-bird-nest/
+data/active/
+data/external/
+experiments/visualizations/
+experiments/pytorch-mask-r-cnn-bird-nest/
 pytorch-mask-r-cnn-training-windows.ipynb
-bird_nest_report.ipynb
+notebooks/bird_nest_report.ipynb
 *.pth
 *.ttf
 

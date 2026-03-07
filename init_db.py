@@ -6,7 +6,7 @@ from pathlib import Path
 from werkzeug.security import generate_password_hash
 
 PROJECT_ROOT = Path(__file__).resolve().parent
-APP_ROOT = PROJECT_ROOT / "mcnn-flask-deploy"
+APP_ROOT = PROJECT_ROOT / "deploy" / "flask-service"
 
 if str(APP_ROOT) not in sys.path:
     sys.path.insert(0, str(APP_ROOT))
@@ -46,15 +46,20 @@ def seed_models() -> None:
         },
         {
             "name": "Oil Leak Detection",
-            "type": "Infrared",
-            "status": "Inactive",
-            "weights_path": "checkpoints/oil_leak_placeholder.pth",
+            "type": "Object Detection",
+            "status": "Active",
+            "weights_path": "checkpoints/oil_leak_yolov8.pt",
         },
     ]
 
     for model_data in models_to_seed:
-        if not AIModel.query.filter_by(name=model_data["name"]).first():
+        model = AIModel.query.filter_by(name=model_data["name"]).first()
+        if not model:
             db.session.add(AIModel(**model_data))
+            continue
+        model.type = model_data["type"]
+        model.status = model_data["status"]
+        model.weights_path = model_data["weights_path"]
 
 
 def main() -> None:
