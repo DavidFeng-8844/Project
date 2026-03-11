@@ -36,6 +36,7 @@ CSDN_SOURCE = REPO_ROOT / "data" / "active" / "oil_leak_yolo"
 # Output paths
 # ---------------------
 SINGLE_OUTPUT = REPO_ROOT / "data" / "processed" / "oil_leak"
+CSDN_OUTPUT = REPO_ROOT / "data" / "processed" / "oil_leak_csdn"
 MERGED_OUTPUT = REPO_ROOT / "data" / "processed" / "oil_leak_merged"
 
 # ---------------------
@@ -312,6 +313,22 @@ def prepare_single() -> Path:
     return yaml_path
 
 
+def prepare_csdn() -> Path:
+    """Use only the CSDN YOLO dataset with its original train/valid split."""
+    print(f"Source : {CSDN_SOURCE}")
+    print(f"Output : {CSDN_OUTPUT}")
+    _ensure_dirs(CSDN_OUTPUT)
+    _clear_dir(CSDN_OUTPUT)
+
+    stats = ingest_yolo(CSDN_SOURCE, CSDN_OUTPUT, prefix="")
+    yaml_path = generate_yaml(CSDN_OUTPUT, "oil_leak_csdn.yaml")
+
+    print(f"  Train: {stats['train_img']} images, {stats['train_obj']} objects")
+    print(f"  Val:   {stats['val_img']} images, {stats['val_obj']} objects")
+    print(f"  YAML:  {yaml_path}")
+    return yaml_path
+
+
 def prepare_merged() -> Path:
     print(f"Source A (VOC) : {VOC_SOURCE}")
     print(f"Source B (YOLO): {CSDN_SOURCE}")
@@ -342,9 +359,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Prepare oil-leak YOLO dataset")
     parser.add_argument(
         "--mode",
-        choices=["single", "merged"],
+        choices=["single", "csdn", "merged"],
         default="merged",
-        help="single = original VOC only; merged = VOC + CSDN",
+        help="single = original VOC only; csdn = CSDN YOLO only; merged = VOC + CSDN",
     )
     args = parser.parse_args()
 
@@ -354,6 +371,8 @@ def main() -> None:
 
     if args.mode == "single":
         yaml_path = prepare_single()
+    elif args.mode == "csdn":
+        yaml_path = prepare_csdn()
     else:
         yaml_path = prepare_merged()
 
