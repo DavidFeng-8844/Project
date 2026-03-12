@@ -41,8 +41,8 @@ Strategy: ``vertical slice first, then horizontal scale''---complete one module 
 
 \begin{itemize}
   \item \textbf{Module A (bird nest):} PoC completed; validates full pipeline (data -- training -- deployment).
-  \item \textbf{Module B (oil leak):} YOLOv8 training and data-preparation pipeline in place and wired into Flask; full training results and metrics to be added.
-  \item \textbf{Module C (infrared high-temperature):} Implemented and integrated in deploy/flask-service; supports user-defined alarm temperature range, OCR-based high/low temperature scale reading, and watermark/legend suppression; see Section~3.
+  \item \textbf{Module B (oil leak):} YOLOv8s trained on the CSDN dataset (train10-csdn) and integrated with Flask; best validation mAP50 $\approx$ 0.39, mAP50-95 $\approx$ 0.26; see Section~3 for details.
+  \item \textbf{Module C (infrared high-temperature):} Implemented and integrated in \texttt{deploy/flask-service}; supports user-defined alarm temperature range, OCR-based high/low temperature scale reading, and watermark/legend suppression; see Section~3.
 \end{itemize}
 
 %=============================================================================
@@ -121,11 +121,36 @@ On the COCO validation set: bbox AP$_{50}$ = 1.000, segm AP$_{50}$ = 1.000, segm
 
 \subsubsection{Data Preparation}
 
-Oil leak data come from two sources: an original VOC-format dataset ($\sim$103 images with XML annotations) and YOLO-format data from sources such as CSDN. \texttt{prepare\_dataset.py} supports three modes: VOC only, CSDN YOLO only, or merged ($\sim$333 images, $\sim$8:2 train/val). The script converts VOC boxes to YOLO normalized format, uses a single class \texttt{oil\_leak}, and writes a dataset YAML (paths, class count, names) for YOLOv8. Merged mode increases scale and diversity for better generalization. If runs such as \texttt{runs/detect/train10-csdn} exist, \texttt{results.csv} and \texttt{results.png} can be used in the report and the best weights (e.g.\ \texttt{best.pt}) copied to \texttt{checkpoints/oil\_leak\_yolov8.pt} for Flask.
+Oil leak data come from two sources: an original VOC-format dataset ($\sim$103 images with XML annotations) and YOLO-format data from sources such as CSDN. \texttt{prepare\_dataset.py} supports three modes: VOC only, CSDN YOLO only, or merged ($\sim$333 images, $\sim$8:2 train/val). The script converts VOC boxes to YOLO normalized format, uses a single class \texttt{oil\_leak}, and writes a dataset YAML for YOLOv8. The training results reported here are from \texttt{runs/detect/train10-csdn}, which uses the \textbf{CSDN dataset} (\texttt{oil\_leak\_csdn.yaml}), i.e.\ YOLO-format data from the CSDN source only.
 
 \subsubsection{Training Config}
 
-YOLOv8 (default \texttt{yolov8s.pt}) is used for single-class detection. Main hyperparameters: 150 epochs, input 640, batch 8, AdamW, cosine LR, mosaic/mixup and other augmentations, RAM cache, fixed seed for reproducibility; patience 30 for early stopping. The script is \texttt{src/oil\_leak/train.py} and by default uses the merged-dataset YAML; \texttt{--data}, \texttt{--epochs}, \texttt{--model}, etc.\ can be set from the command line for ablations and comparisons.
+YOLOv8s (\texttt{yolov8s.pt}) is used for single-class detection. Main hyperparameters for train10-csdn: 150 epochs, input 640, batch 8, AdamW, cosine LR, mosaic 0.3, mixup 0.05, RAM cache, patience 30, AMP enabled, fixed random seed 42. The training script is \texttt{src/oil\_leak/train.py}; \texttt{--data}, \texttt{--epochs}, \texttt{--model}, etc.\ can be set from the command line.
+
+\subsubsection{Validation Metrics and Training Results}
+
+train10-csdn ran for 123 epochs; best validation metrics occur around epochs 93--94: \textbf{precision(B)} $\approx$ 0.83, \textbf{recall(B)} $\approx$ 0.34, \textbf{mAP50(B)} $\approx$ 0.39, \textbf{mAP50-95(B)} $\approx$ 0.26. Training losses (box/cls/dfl) decrease and stabilize over epochs. Figures~\ref{fig:oil-pr}, \ref{fig:oil-f1} and \ref{fig:oil-cm} show the validation PR curve, F1 curve, and normalized confusion matrix respectively. The best weights (\texttt{best.pt}) from this run can be copied to \texttt{checkpoints/oil\_leak\_yolov8.pt} for the Flask inference service.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.85\textwidth]{../../../src/oil_leak/runs/detect/train10-csdn/BoxPR_curve.png}
+  \caption{Oil leak (train10-csdn) validation precision--recall curve; IoU threshold 0.5.}
+  \label{fig:oil-pr}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.85\textwidth]{../../../src/oil_leak/runs/detect/train10-csdn/BoxF1_curve.png}
+  \caption{Oil leak (train10-csdn) validation F1 curve; F1 at different confidence thresholds.}
+  \label{fig:oil-f1}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.7\textwidth]{../../../src/oil_leak/runs/detect/train10-csdn/confusion_matrix_normalized.png}
+  \caption{Oil leak (train10-csdn) validation normalized confusion matrix.}
+  \label{fig:oil-cm}
+\end{figure}
 
 \subsubsection{Integration with Flask}
 
