@@ -1,0 +1,520 @@
+\documentclass[aspectratio=169]{beamer}
+\usetheme{Madrid}
+\setbeamertemplate{navigation symbols}{}
+\usecolortheme{default}
+\usepackage{graphicx}
+\usepackage{caption}
+\usepackage{booktabs}
+
+% Ensure content doesn't overlap with bottom title bar
+\setbeamersize{text margin left=0.3cm,text margin right=0.3cm}
+
+\title{AI-based Damage Detection for Power Grid Equipment with SaaS-oriented Design}
+\subtitle{Midterm Defense}
+\author{Yujie Feng}
+\institute{Supervisor: Jin Hou}
+\date{}
+
+% Customize footline with three adaptive columns: author/institute, title, page number
+\setbeamertemplate{footline}
+{
+  \leavevmode%
+  \hbox{%
+  \begin{beamercolorbox}[wd=0.3\paperwidth,ht=2.25ex,dp=1ex,left]{author in head/foot}%
+    \usebeamerfont{author in head/foot}\hspace*{2ex}\insertshortauthor\hspace*{0.5em}\insertshortinstitute
+  \end{beamercolorbox}%
+  \begin{beamercolorbox}[wd=0.5\paperwidth,ht=2.25ex,dp=1ex,center]{title in head/foot}%
+    \usebeamerfont{title in head/foot}\insertshorttitle
+  \end{beamercolorbox}%
+  \begin{beamercolorbox}[wd=0.2\paperwidth,ht=2.25ex,dp=1ex,right]{date in head/foot}%
+    \usebeamerfont{date in head/foot}\insertframenumber{} / \inserttotalframenumber\hspace*{2ex}
+  \end{beamercolorbox}%
+  }%
+  \vskip0pt%
+}
+
+\begin{document}
+
+%------------------------------------------------
+\begin{frame}
+  \titlepage
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}
+\frametitle{Outline}
+\vspace{-5pt}
+\begin{columns}
+\column{0.48\linewidth}
+\begin{enumerate}
+  \item Project Overview
+  \item Progress Summary
+  \item Module A: Bird Nest Detection (Completed)
+  \item Module B: Oil Leak Detection (Trained \& Deployed)
+\end{enumerate}
+
+\column{0.48\linewidth}
+\begin{enumerate}
+  \setcounter{enumi}{4}
+  \item Module C: Infrared High-Temperature Detection (Integrated)
+  \item SaaS Flask Microservice Platform
+  \item Problems \& Challenges
+  \item Next Phase Work Plan
+\end{enumerate}
+\end{columns}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}
+\frametitle{Project Overview: A Scalable SaaS Inspection Platform}
+\vspace{-5pt}
+\small
+\begin{columns}
+\column{0.32\linewidth}
+\textbf{Multi-modal Inputs}
+\begin{itemize}
+  \item UAV RGB imagery
+  \item Infrared imagery
+  \item Sensor telemetry streams
+  \item Historical inspection records
+\end{itemize}
+
+\column{0.36\linewidth}
+\textbf{AI Platform Core}
+\begin{itemize}
+  \item SaaS backend
+    \begin{itemize}
+      \item unified auth / RBAC
+      \item multi-tenant isolation
+      \item task queue / data lake
+    \end{itemize}
+  \item AI model registry
+    \begin{itemize}
+      \item Module A: Bird Nest Detection {\color{green!70!black}(Done)}
+      \item Module B: Oil Leak Detection {\color{orange!80!black}(In progress)}
+      \item Module C: Infrared High-Temp. {\color{orange!80!black}(Integrated)}
+    \end{itemize}
+\end{itemize}
+
+\column{0.32\linewidth}
+\textbf{Enterprise Outputs}
+\begin{itemize}
+  \item Alert center \& dashboard
+  \item Maintenance work orders
+  \item Visual analytics portal
+  \item API \& mobile integration
+\end{itemize}
+\end{columns}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}
+\frametitle{Midterm Progress Summary}
+\vspace{-5pt}
+\small
+\begin{block}{Strategy: ``Vertical Slice First, then Horizontal Scale''}
+Complete one module end-to-end before extending to multi-module registry and unified scheduling.
+\end{block}
+\vspace{4pt}
+\begin{columns}[T]
+\column{0.32\linewidth}
+\textbf{\color{green!70!black}Module A (Completed)}
+\begin{itemize}
+  \item Mask R-CNN instance segmentation
+  \item End-to-end PoC: data $\to$ training $\to$ deployment
+  \item bbox AP$_{50}$ = 1.000, segm AP$_{50}$ = 1.000
+  \item Flask microservice deployed
+\end{itemize}
+
+\column{0.32\linewidth}
+\textbf{\color{orange!80!black}Module B (In Progress)}
+\begin{itemize}
+  \item YOLOv8s object detection
+  \item Trained on CSDN dataset (123 epochs)
+  \item Best mAP50 $\approx$ 0.39
+  \item Integrated with Flask API
+\end{itemize}
+
+\column{0.32\linewidth}
+\textbf{\color{orange!80!black}Module C (Integrated)}
+\begin{itemize}
+  \item OCR + pixel-mapping hybrid
+  \item No dedicated DL model training
+  \item User-defined alarm temperature
+  \item Hotspot visualization deployed
+\end{itemize}
+\end{columns}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}
+\frametitle{Module A: Bird Nest Detection --- Data \& Model}
+\vspace{-5pt}
+\begin{columns}[T]
+\column{0.48\linewidth}
+\textbf{Dataset \& Augmentation}
+\begin{itemize}
+  \item 54 COCO-format images (43 train, 11 val)
+  \item Bounding boxes + instance segmentation polygons
+  \item Deterministic augmentation pipeline:
+    \begin{itemize}
+      \item Custom Random IoU Crop (scale 0.3--1.0)
+      \item Photometric jitter (brightness, contrast)
+      \item ResizeMax + PadSquare ($512\times512$)
+    \end{itemize}
+  \item \textit{Why deterministic? Generative augmentation introduced physically implausible artifacts.}
+\end{itemize}
+
+\column{0.48\linewidth}
+\textbf{Model \& Training Config}
+\begin{itemize}
+  \item Model: Mask R-CNN (ResNet50 + FPN v2)
+  \item Input: $512\times512$, batch size 4, 40 epochs
+  \item Optimizer: AdamW (lr=$5\times10^{-4}$) + OneCycleLR
+  \item Mixed precision (AMP) enabled
+  \item $\sim$27\,s per epoch; GPU utilization 70--85\%
+\end{itemize}
+\end{columns}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}
+\frametitle{Module A: Bird Nest Detection --- Validation Metrics}
+\vspace{-5pt}
+\begin{columns}
+\column{0.45\linewidth}
+\textbf{COCO Validation Metrics}
+\small
+\begin{center}
+\begin{tabular}{lcc}
+\toprule
+Metric & \textbf{bbox} & \textbf{segm} \\
+\midrule
+AP@[0.50:0.95] & 0.805 & 0.795 \\
+AP50 & \textbf{1.000} & \textbf{1.000} \\
+AP75 & 1.000 & 0.919 \\
+AR@[0.50:0.95] & 0.837 & 0.828 \\
+\bottomrule
+\end{tabular}
+\end{center}
+\vspace{4pt}
+\small Score threshold 0.4--0.5 gives optimal F1 trade-off in deployment.
+
+\column{0.52\linewidth}
+\centering
+\includegraphics[width=0.90\textwidth,height=0.55\textheight,keepaspectratio]{../../assets/BirdNestDetectionResult.png}
+\vspace{-4pt}
+\captionof{figure}{Bird nest detection: bounding box and instance mask overlay.}
+\end{columns}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}
+\frametitle{Module A: Bird Nest Detection --- Training Dynamics}
+\vspace{-5pt}
+\begin{columns}
+\column{0.48\linewidth}
+\centering
+\includegraphics[width=0.95\textwidth]{../../../experiments/visualizations/loss_curves.png}
+\vspace{-5pt}
+\captionof{figure}{Train/Validation Loss Curves}
+
+\column{0.48\linewidth}
+\textbf{Key Observations}
+\begin{itemize}
+  \item Train loss: $1.41 \to 0.14$; Val loss: $0.65 \to 0.19$
+  \item Loss plateaus around epoch 20 --- no overfitting
+  \item Right-skewed IoU histogram: strong localization
+  \item PR curve stays near precision 1.0 at IoU=0.50
+  \item IoU=0.75 settles $\approx$0.93; IoU=0.90 dips to $\approx$0.70
+\end{itemize}
+\end{columns}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}
+\frametitle{Module A: Bird Nest Detection --- PR \& Threshold Analysis}
+\vspace{-5pt}
+\begin{columns}
+\column{0.48\linewidth}
+\centering
+\includegraphics[width=0.90\textwidth]{../../../experiments/visualizations/pr_curve_bbox_ap50.png}
+\vspace{-5pt}
+\captionof{figure}{Bbox PR Curves (IoU=0.50/0.75/0.90)}
+
+\column{0.48\linewidth}
+\centering
+\includegraphics[width=0.90\textwidth]{../../../experiments/visualizations/threshold_sweep_bbox.png}
+\vspace{-5pt}
+\captionof{figure}{Score Threshold vs.\ P/R/F1 (IoU$\geq$0.5)}
+\end{columns}
+\vspace{2pt}
+\small
+\textit{With AP$_{50}$=1.0, threshold 0.4--0.5 optimizes F1; higher thresholds (0.6--0.8) trade recall for precision in deployment.}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}
+\frametitle{Module B: Oil Leak Detection --- Data \& Training Config}
+\vspace{-5pt}
+\begin{columns}[T]
+\column{0.48\linewidth}
+\textbf{Data Sources}
+\begin{itemize}
+  \item Original VOC-format dataset ($\sim$103 images, XML annotations)
+  \item YOLO-format CSDN dataset
+  \item \texttt{prepare\_dataset.py}: VOC-only / CSDN-only / merged ($\sim$333 images, 8:2 split)
+  \item Single class: \texttt{oil\_leak}
+  \item Results reported from \textbf{train10-csdn} (CSDN dataset only)
+\end{itemize}
+
+\column{0.48\linewidth}
+\textbf{Training Configuration (YOLOv8s)}
+\begin{itemize}
+  \item Model: \texttt{yolov8s.pt}, single-class detection
+  \item 150 epochs, input 640, batch 8
+  \item AdamW optimizer, cosine LR schedule
+  \item Mosaic 0.3, mixup 0.05, RAM cache
+  \item Patience 30, AMP enabled, seed 42
+\end{itemize}
+\end{columns}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}
+\frametitle{Module B: Oil Leak Detection --- Validation Metrics}
+\vspace{-5pt}
+\begin{columns}
+\column{0.48\linewidth}
+\textbf{Best Validation Results} (train10-csdn, epoch 93--94)
+\small
+\begin{center}
+\begin{tabular}{lc}
+\toprule
+Metric & Value \\
+\midrule
+Precision(B) & $\approx$ 0.83 \\
+Recall(B) & $\approx$ 0.34 \\
+mAP50(B) & $\approx$ \textbf{0.39} \\
+mAP50-95(B) & $\approx$ \textbf{0.26} \\
+Total epochs run & 123 \\
+\bottomrule
+\end{tabular}
+\end{center}
+\vspace{4pt}
+\small High precision / low recall suggests conservative detections; full merged-dataset training planned next.
+
+\column{0.48\linewidth}
+\centering
+\includegraphics[width=0.90\textwidth,height=0.55\textheight,keepaspectratio]{../../assets/OilLeakDetectionResult.png}
+\vspace{-4pt}
+\captionof{figure}{Oil leak detection: identified leakage region on equipment.}
+\end{columns}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}
+\frametitle{Module B: Oil Leak Detection --- Training Results}
+\vspace{-5pt}
+\begin{columns}
+\column{0.48\linewidth}
+\centering
+\includegraphics[width=0.95\textwidth]{../../../src/oil_leak/runs/detect/train10-csdn/results.png}
+\vspace{-5pt}
+\captionof{figure}{Training Results (loss / mAP curves)}
+
+\column{0.48\linewidth}
+\centering
+\includegraphics[width=0.90\textwidth]{../../../src/oil_leak/runs/detect/train10-csdn/BoxPR_curve.png}
+\vspace{-5pt}
+\captionof{figure}{Validation PR Curve (IoU 0.5)}
+\end{columns}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}
+\frametitle{Module B: Oil Leak Detection --- F1 \& Confusion Matrix}
+\vspace{-5pt}
+\begin{columns}
+\column{0.48\linewidth}
+\centering
+\includegraphics[width=0.90\textwidth]{../../../src/oil_leak/runs/detect/train10-csdn/BoxF1_curve.png}
+\vspace{-5pt}
+\captionof{figure}{Validation F1 Curve}
+
+\column{0.48\linewidth}
+\centering
+\includegraphics[width=0.90\textwidth]{../../../src/oil_leak/runs/detect/train10-csdn/confusion_matrix_normalized.png}
+\vspace{-5pt}
+\captionof{figure}{Normalized Confusion Matrix}
+\end{columns}
+\vspace{2pt}
+\small
+\textit{Box-level detection sufficient for ``presence and approximate location''; pixel-level segmentation can be added if area statistics are required.}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}
+\frametitle{Module C: Infrared High-Temperature Detection}
+\vspace{-5pt}
+\begin{columns}[T]
+\column{0.48\linewidth}
+\textbf{Approach: OCR + Pixel-Mapping Hybrid}
+\begin{itemize}
+  \item No dedicated DL model training required
+  \item EasyOCR parses high/low temperature scale from legend
+  \item Pixel intensity $\to$ temperature mapping with heuristic OCR correction
+  \item User-defined alarm temperature threshold (default 50$^\circ$C)
+  \item Outputs: hotspot boxes, per-hotspot temp., global max temp., annotated visualization
+\end{itemize}
+
+\column{0.48\linewidth}
+\textbf{Suppression Techniques}
+\begin{itemize}
+  \item \textbf{Border watermark mask}: detects and masks bright white logo/watermark near image border
+  \item \textbf{OCR text-region mask}: excludes legend and scale digits to reduce false positives
+  \item Filters regions above alarm threshold only
+\end{itemize}
+\end{columns}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}
+\frametitle{Module C: Infrared Detection --- Result}
+\vspace{-5pt}
+\begin{columns}
+\column{0.48\linewidth}
+\centering
+\includegraphics[width=0.95\textwidth,height=0.70\textheight,keepaspectratio]{../../assets/InfraredHighTempDetection.png}
+\vspace{-4pt}
+\captionof{figure}{Hotspot bounding above user-defined threshold.}
+
+\column{0.48\linewidth}
+\centering
+\includegraphics[width=0.95\textwidth,height=0.70\textheight,keepaspectratio]{../../assets/InfraredCard.png}
+\vspace{-4pt}
+\captionof{figure}{Infrared detection result card.}
+\end{columns}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}
+\frametitle{SaaS Flask Microservice --- Platform Overview}
+\vspace{-5pt}
+\begin{columns}[T]
+\column{0.48\linewidth}
+\textbf{Flask REST API Features}
+\begin{itemize}
+  \item Batch image upload, on-demand inference
+  \item Model selection: Bird Nest / Oil Leak / Infrared
+  \item JSON result (boxes, confidence/temperature, class) + visualization
+  \item Single \& ZIP download for offline archiving
+  \item Statistical dashboards for inference history
+  \item Large-image handling: resize / tiling to avoid OOM
+  \item Gunicorn multi-worker for production concurrency
+\end{itemize}
+
+\column{0.48\linewidth}
+\textbf{Architecture \& SaaS Role}
+\begin{itemize}
+  \item All three modules share one upload/inference/download API
+  \item Configurable model registry: weight path managed per model type
+  \item ``Model-as-a-Service'' foundation for multi-tenant RBAC
+  \item Fallback to local checkpoint if registry entry missing
+  \item Structured exception handling at API layer
+\end{itemize}
+\end{columns}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}
+\frametitle{SaaS Platform --- User Interface}
+\vspace{-5pt}
+\begin{columns}
+\column{0.48\linewidth}
+\centering
+\includegraphics[width=0.95\textwidth,height=0.35\textheight,keepaspectratio]{../../assets/LoginPage.png}
+\vspace{-3pt}
+\captionof{figure}{Login Interface}
+
+\column{0.48\linewidth}
+\centering
+\includegraphics[width=0.95\textwidth,height=0.35\textheight,keepaspectratio]{../../assets/MainPage.png}
+\vspace{-3pt}
+\captionof{figure}{Main Dashboard \& Task Flow}
+\end{columns}
+\vspace{8pt}
+\centering
+\includegraphics[width=0.55\textwidth,height=0.28\textheight,keepaspectratio]{../../assets/HistroyPage.png}
+\vspace{-3pt}
+\captionof{figure}{History \& Statistical Analytics for Inference Records and Work Orders}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}
+\frametitle{Problems \& Challenges}
+\vspace{-5pt}
+\begin{block}{1. Generalization}
+\begin{itemize}
+  \item Bird nest AP$_{50}$=1.0 on same-distribution validation --- may drop in real conditions (haze, backlight, new tower types, seasonal variation)
+  \item Cross-scene data, negative and hard-sample design needed as platform-level requirements
+\end{itemize}
+\end{block}
+\begin{block}{2. Technical Choices}
+\begin{itemize}
+  \item \textbf{SaaS backend}: feature-complete prototype (RBAC, task queue) vs.\ production-grade auth (OAuth2, audit logs) --- current preference: demonstrable multi-model prototype first
+  \item \textbf{Oil leak}: YOLOv8 box-level sufficient for location; pixel-level segmentation (U-Net) needed only if area statistics required
+  \item \textbf{Infrared}: standalone module sufficient now; RGB+heatmap fusion possible for multi-modal analysis
+\end{itemize}
+\end{block}
+\begin{block}{3. Data \& Deployment Constraints}
+\begin{itemize}
+  \item Dataset size modest (54 bird nest; $\sim$333 merged oil leak); annotation quality critical
+  \item Flask multi-process handles moderate load; queue+worker pool needed for high concurrency
+\end{itemize}
+\end{block}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}
+\frametitle{Next Phase Work Plan}
+\vspace{-5pt}
+\begin{columns}
+\column{0.48\linewidth}
+\textbf{Track 1 --- SaaS Platform (Weeks 5--10)}
+\begin{itemize}
+  \item Multi-tenant backend with RBAC and task orchestration
+  \item AI model registry API: register, query, enable/disable, weight-path management
+  \item Productize PoC training utilities: configurable augmentation, logging, checkpoint management
+\end{itemize}
+
+\column{0.48\linewidth}
+\textbf{Track 2 --- New Modules (Weeks 11--18)}
+\begin{itemize}
+  \item Complete Module B (oil leak) on merged dataset; update registry and metrics
+  \item Module C (infrared): robustness and multi-device adaptation
+  \item Reuse \texttt{prepare\_dataset}, training scripts, deployment pipeline for new modules
+\end{itemize}
+\end{columns}
+\vspace{8pt}
+\begin{block}{Weeks 19--20: Final Integration \& Defence}
+\begin{itemize}
+  \item End-to-end tests for multi-module and multi-user scenarios
+  \item Consolidate experiment data and screenshots; complete final report and defence materials
+  \item Deliverable: demonstrable three-module (Bird Nest / Oil Leak / Infrared) SaaS prototype
+\end{itemize}
+\end{block}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}
+\frametitle{Discussion Points}
+\vspace{-5pt}
+\begin{enumerate}
+  \item \textbf{Generalization strategy}: Should the project invest in cross-scene data collection or focus on augmentation and hard-sample mining to improve robustness of all three modules?
+  \item \textbf{Oil leak improvement}: Current mAP50 $\approx$ 0.39 on CSDN dataset only. Should training be re-run on the merged VOC+CSDN dataset, or should the model architecture be upgraded (e.g.\ YOLOv8m / segmentation head)?
+  \item \textbf{SaaS depth vs.\ breadth}: Should the final phase prioritize a fully functional RBAC and task-queue backend, or focus on expanding the AI modules and demo quality for the defence?
+\end{enumerate}
+\end{frame}
+
+\end{document}
