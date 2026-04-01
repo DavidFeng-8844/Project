@@ -5,6 +5,8 @@
 \usepackage{graphicx}
 \usepackage{caption}
 \usepackage{booktabs}
+\usepackage{tikz}
+\usetikzlibrary{shapes.geometric, arrows.meta, positioning, fit, backgrounds, calc}
 
 % Ensure content doesn't overlap with bottom title bar
 \setbeamersize{text margin left=0.3cm,text margin right=0.3cm}
@@ -99,10 +101,10 @@
 \column{0.32\linewidth}
 \textbf{Enterprise Outputs}
 \begin{itemize}
-  \item Alert center \& dashboard
-  \item Maintenance work orders
-  \item Visual analytics portal
-  \item API \& mobile integration
+  \item Alert Center (Dashboards)
+  \item Work Order Dispatch
+  \item Visual Analytics Portal
+  \item API Integration
 \end{itemize}
 \end{columns}
 \end{frame}
@@ -120,28 +122,28 @@ Complete one module end-to-end before extending to multi-module registry and uni
 \column{0.32\linewidth}
 \textbf{\color{green!70!black}Module A (Completed)}
 \begin{itemize}
-  \item Mask R-CNN instance segmentation
-  \item End-to-end PoC: data $\to$ training $\to$ deployment
-  \item bbox AP$_{50}$ = 1.000, segm AP$_{50}$ = 1.000
-  \item Flask microservice deployed
+  \item Mask R-CNN (Segm.)
+  \item Bbox AP$_{50}$ = 1.0
+  \item Flask Deployed
+  \item \textbf{Status:} End-to-end PoC
 \end{itemize}
 
 \column{0.32\linewidth}
 \textbf{\color{orange!80!black}Module B (In Progress)}
 \begin{itemize}
-  \item YOLOv8s object detection
-  \item Trained on CSDN dataset (123 epochs)
+  \item YOLOv8s (Det.)
+  \item Trained: CSDN Data
   \item Best mAP50 $\approx$ 0.39
-  \item Integrated with Flask API
+  \item \textbf{Status:} API Integrated
 \end{itemize}
 
 \column{0.32\linewidth}
 \textbf{\color{orange!80!black}Module C (Integrated)}
 \begin{itemize}
-  \item OCR + pixel-mapping hybrid
-  \item No dedicated DL model training
-  \item User-defined alarm temperature
-  \item Hotspot visualization deployed
+  \item OCR + Pixel Mapping
+  \item Training-Free
+  \item Custom Alarm Temp.
+  \item \textbf{Status:} Visualized \& Deployed
 \end{itemize}
 \end{columns}
 \end{frame}
@@ -154,25 +156,23 @@ Complete one module end-to-end before extending to multi-module registry and uni
 \column{0.48\linewidth}
 \textbf{Dataset \& Augmentation}
 \begin{itemize}
-  \item 54 COCO-format images (43 train, 11 val)
-  \item Bounding boxes + instance segmentation polygons
-  \item Deterministic augmentation pipeline:
+  \item \textbf{54 COCO Images:} Bbox + Polygons
+  \item \textbf{Deterministic Augmentation:}
     \begin{itemize}
-      \item Custom Random IoU Crop (scale 0.3--1.0)
-      \item Photometric jitter (brightness, contrast)
+      \item Random IoU Crop (0.3--1.0)
+      \item Photometric jitter 
       \item ResizeMax + PadSquare ($512\times512$)
     \end{itemize}
-  \item \textit{Why deterministic? Generative augmentation introduced physically implausible artifacts.}
+  \item $\rightarrow$ \textit{Avoids generative artifacts.}
 \end{itemize}
 
 \column{0.48\linewidth}
-\textbf{Model \& Training Config}
+\textbf{Model \& Config}
 \begin{itemize}
-  \item Model: Mask R-CNN (ResNet50 + FPN v2)
-  \item Input: $512\times512$, batch size 4, 40 epochs
-  \item Optimizer: AdamW (lr=$5\times10^{-4}$) + OneCycleLR
-  \item Mixed precision (AMP) enabled
-  \item $\sim$27\,s per epoch; GPU utilization 70--85\%
+  \item \textbf{Arch:} Mask R-CNN (ResNet50 + FPNv2)
+  \item \textbf{Opt:} AdamW ($5\times10^{-4}$) + OneCycleLR
+  \item \textbf{Tech:} AMP Mixed Precision
+  \item \textbf{Perf:} $\sim$27s/epoch, 70--85\% GPU
 \end{itemize}
 \end{columns}
 \end{frame}
@@ -222,11 +222,10 @@ AR@[0.50:0.95] & 0.837 & 0.828 \\
 \column{0.48\linewidth}
 \textbf{Key Observations}
 \begin{itemize}
-  \item Train loss: $1.41 \to 0.14$; Val loss: $0.65 \to 0.19$
-  \item Loss plateaus around epoch 20 --- no overfitting
-  \item Right-skewed IoU histogram: strong localization
-  \item PR curve stays near precision 1.0 at IoU=0.50
-  \item IoU=0.75 settles $\approx$0.93; IoU=0.90 dips to $\approx$0.70
+  \item Train: $1.41 \to 0.14$ $\mid$ Val: $0.65 \to 0.19$
+  \item Plateaus $\sim$epoch 20 --- No Overfitting
+  \item Right-skewed IoU: Strong Localization
+  \item AR/AP drops gracefully at IoU 0.90
 \end{itemize}
 \end{columns}
 \end{frame}
@@ -261,21 +260,19 @@ AR@[0.50:0.95] & 0.837 & 0.828 \\
 \column{0.48\linewidth}
 \textbf{Data Sources}
 \begin{itemize}
-  \item Original VOC-format dataset ($\sim$103 images, XML annotations)
-  \item YOLO-format CSDN dataset
-  \item \texttt{prepare\_dataset.py}: VOC-only / CSDN-only / merged ($\sim$333 images, 8:2 split)
+  \item VOC ($\sim$103) + CSDN ($\sim$230)
+  \item \texttt{prepare\_dataset.py} $\to$ Unified YOLO format
   \item Single class: \texttt{oil\_leak}
-  \item Results reported from \textbf{train10-csdn} (CSDN dataset only)
+  \item \textbf{Current Run (train10):} CSDN Only
 \end{itemize}
 
 \column{0.48\linewidth}
-\textbf{Training Configuration (YOLOv8s)}
+\textbf{Training Config (YOLOv8s)}
 \begin{itemize}
-  \item Model: \texttt{yolov8s.pt}, single-class detection
-  \item 150 epochs, input 640, batch 8
-  \item AdamW optimizer, cosine LR schedule
-  \item Mosaic 0.3, mixup 0.05, RAM cache
-  \item Patience 30, AMP enabled, seed 42
+  \item \textbf{Arch:} \texttt{yolov8s.pt} (Single Class)
+  \item \textbf{Hyper:} 150 epochs, batch 8, $640\times640$
+  \item \textbf{Opt:} AdamW + Cosine LR
+  \item \textbf{Aug:} Mosaic (0.3), Mixup (0.05)
 \end{itemize}
 \end{columns}
 \end{frame}
@@ -302,7 +299,7 @@ Total epochs run & 123 \\
 \end{tabular}
 \end{center}
 \vspace{4pt}
-\small High precision / low recall suggests conservative detections; full merged-dataset training planned next.
+\small $\rightarrow$ High precision / low recall indicates conservative detection. Next step: Train on full merged data.
 
 \column{0.48\linewidth}
 \centering
@@ -350,7 +347,7 @@ Total epochs run & 123 \\
 \end{columns}
 \vspace{2pt}
 \small
-\textit{Box-level detection sufficient for ``presence and approximate location''; pixel-level segmentation can be added if area statistics are required.}
+\textit{$\rightarrow$ Box-level detection identifies location; pixel-segmentation can be added if area tracking is needed.}
 \end{frame}
 
 %------------------------------------------------
@@ -359,21 +356,20 @@ Total epochs run & 123 \\
 \vspace{-5pt}
 \begin{columns}[T]
 \column{0.48\linewidth}
-\textbf{Approach: OCR + Pixel-Mapping Hybrid}
+\textbf{Approach: OCR Hybrid}
 \begin{itemize}
-  \item No dedicated DL model training required
-  \item EasyOCR parses high/low temperature scale from legend
-  \item Pixel intensity $\to$ temperature mapping with heuristic OCR correction
-  \item User-defined alarm temperature threshold (default 50$^\circ$C)
-  \item Outputs: hotspot boxes, per-hotspot temp., global max temp., annotated visualization
+  \item Deep-Learning Free
+  \item EasyOCR: Parses temp scale
+  \item Pixel-to-Temp Mapping
+  \item \textbf{User Parameter:} Custom Alarm ($50^\circ$C)
 \end{itemize}
 
 \column{0.48\linewidth}
-\textbf{Suppression Techniques}
+\textbf{Noise Suppression}
 \begin{itemize}
-  \item \textbf{Border watermark mask}: detects and masks bright white logo/watermark near image border
-  \item \textbf{OCR text-region mask}: excludes legend and scale digits to reduce false positives
-  \item Filters regions above alarm threshold only
+  \item \textbf{Watermark Mask:} Ignores white logos
+  \item \textbf{Legend Mask:} Excludes OCR regions
+  \item \textbf{Result:} Outputs bounded hotspots + $\Delta$T
 \end{itemize}
 \end{columns}
 \end{frame}
@@ -401,29 +397,45 @@ Total epochs run & 123 \\
 \begin{frame}
 \frametitle{SaaS Flask Microservice --- Platform Overview}
 \vspace{-5pt}
-\begin{columns}[T]
-\column{0.48\linewidth}
-\textbf{Flask REST API Features}
-\begin{itemize}
-  \item Batch image upload, on-demand inference
-  \item Model selection: Bird Nest / Oil Leak / Infrared
-  \item JSON result (boxes, confidence/temperature, class) + visualization
-  \item Single \& ZIP download for offline archiving
-  \item Statistical dashboards for inference history
-  \item Large-image handling: resize / tiling to avoid OOM
-  \item Gunicorn multi-worker for production concurrency
-\end{itemize}
+\textbf{Architecture \& Request Flow}
+\vspace{5pt}
+\begin{center}
+\resizebox{0.9\textwidth}{!}{
+\begin{tikzpicture}[
+  node distance=1.5cm and 2cm,
+  box/.style={rectangle, draw=black!60, fill=blue!5, thick, rounded corners, minimum width=2.5cm, minimum height=1cm, align=center, font=\small\sffamily},
+  db/.style={cylinder, draw=black!60, fill=gray!10, thick, aspect=0.25, minimum width=1.5cm, minimum height=1.5cm, align=center, shape border rotate=90, font=\footnotesize\sffamily},
+  arrow/.style={-{Stealth[scale=1.2]}, thick, draw=black!70}
+]
 
-\column{0.48\linewidth}
-\textbf{Architecture \& SaaS Role}
-\begin{itemize}
-  \item All three modules share one upload/inference/download API
-  \item Configurable model registry: weight path managed per model type
-  \item ``Model-as-a-Service'' foundation for multi-tenant RBAC
-  \item Fallback to local checkpoint if registry entry missing
-  \item Structured exception handling at API layer
-\end{itemize}
-\end{columns}
+% Nodes
+\node[box, fill=green!10] (client) {Web UI / Client \\ (Batch Upload)};
+\node[box, right=of client, fill=orange!10] (api) {Flask API Gateway \\ \footnotesize(Gunicorn)};
+\node[box, right=of api, yshift=1.2cm] (modelA) {Module A \\ \footnotesize(Mask R-CNN)};
+\node[box, right=of api] (modelB) {Module B \\ \footnotesize(YOLOv8s)};
+\node[box, right=of api, yshift=-1.2cm] (modelC) {Module C \\ \footnotesize(OCR Hybrid)};
+\node[db, below=of api] (registry) {Model \\ Registry};
+\node[box, right=of modelB, xshift=1cm] (output) {Results \\ \footnotesize(JSON + Viz)};
+
+% Background Box for Inference Engine
+\begin{scope}[on background layer]
+  \node[draw=black!30, fill=black!2, dashed, rounded corners, fit=(modelA) (modelB) (modelC), inner sep=0.3cm, label={[font=\small\bfseries, text=black!70]above:Inference Engines}] (engines) {};
+\end{scope}
+
+% Arrows
+\draw[arrow] (client) -- node[above, font=\footnotesize] {Images} (api);
+\draw[arrow] (api) -- node[above, sloped, font=\footnotesize] {Route} (modelA.west);
+\draw[arrow] (api) -- (modelB.west);
+\draw[arrow] (api) -- node[below, sloped, font=\footnotesize] {Route} (modelC.west);
+\draw[arrow, <->] (api) -- node[right, font=\footnotesize] {Fetch Weights} (registry);
+
+\draw[arrow] (modelA.east) -- (output.west);
+\draw[arrow] (modelB.east) -- (output.west);
+\draw[arrow] (modelC.east) -- (output.west);
+
+\end{tikzpicture}
+}
+\end{center}
 \end{frame}
 
 %------------------------------------------------
@@ -456,21 +468,20 @@ Total epochs run & 123 \\
 \vspace{-5pt}
 \begin{block}{1. Generalization}
 \begin{itemize}
-  \item Bird nest AP$_{50}$=1.0 on same-distribution validation --- may drop in real conditions (haze, backlight, new tower types, seasonal variation)
-  \item Cross-scene data, negative and hard-sample design needed as platform-level requirements
+  \item \textbf{Issue:} AP$_{50}$=1.0 on val set $\to$ Risk of performance drop in field (haze, new towers).
+  \item \textbf{Action:} Integrate cross-scene data \& hard-sample mining across the platform.
 \end{itemize}
 \end{block}
 \begin{block}{2. Technical Choices}
 \begin{itemize}
-  \item \textbf{SaaS backend}: feature-complete prototype (RBAC, task queue) vs.\ production-grade auth (OAuth2, audit logs) --- current preference: demonstrable multi-model prototype first
-  \item \textbf{Oil leak}: YOLOv8 box-level sufficient for location; pixel-level segmentation (U-Net) needed only if area statistics required
-  \item \textbf{Infrared}: standalone module sufficient now; RGB+heatmap fusion possible for multi-modal analysis
+  \item \textbf{SaaS:} Prioritize multi-model prototype over enterprise auth (OAuth2) for now.
+  \item \textbf{Oil Leak:} YOLO box-level suffices; pixel-segmentation only if area stats needed.
 \end{itemize}
 \end{block}
-\begin{block}{3. Data \& Deployment Constraints}
+\begin{block}{3. Constraints}
 \begin{itemize}
-  \item Dataset size modest (54 bird nest; $\sim$333 merged oil leak); annotation quality critical
-  \item Flask multi-process handles moderate load; queue+worker pool needed for high concurrency
+  \item \textbf{Data:} Modest datasets ($\sim$50 bird nests, $\sim$300 oil leaks); annotation is bottleneck.
+  \item \textbf{Deploy:} Flask multi-process works; true scale requires queue+worker pool.
 \end{itemize}
 \end{block}
 \end{frame}
@@ -479,29 +490,28 @@ Total epochs run & 123 \\
 \begin{frame}
 \frametitle{Next Phase Work Plan}
 \vspace{-5pt}
-\begin{columns}
+\begin{columns}[T]
 \column{0.48\linewidth}
-\textbf{Track 1 --- SaaS Platform (Weeks 5--10)}
+\textbf{Track 1: SaaS Backend (Weeks 5--10)}
 \begin{itemize}
-  \item Multi-tenant backend with RBAC and task orchestration
-  \item AI model registry API: register, query, enable/disable, weight-path management
-  \item Productize PoC training utilities: configurable augmentation, logging, checkpoint management
+  \item Multi-tenant RBAC \& Task Queue
+  \item AI Model Registry API
+  \item Productize training utilities
 \end{itemize}
 
 \column{0.48\linewidth}
-\textbf{Track 2 --- New Modules (Weeks 11--18)}
+\textbf{Track 2: Modules (Weeks 11--18)}
 \begin{itemize}
-  \item Complete Module B (oil leak) on merged dataset; update registry and metrics
-  \item Module C (infrared): robustness and multi-device adaptation
-  \item Reuse \texttt{prepare\_dataset}, training scripts, deployment pipeline for new modules
+  \item Oil Leak: Train on merged dataset
+  \item Infrared: Multi-device adaptation
+  \item Reuse data/training pipelines
 \end{itemize}
 \end{columns}
 \vspace{8pt}
-\begin{block}{Weeks 19--20: Final Integration \& Defence}
+\begin{block}{Integration \& Defence (Weeks 19--20)}
 \begin{itemize}
-  \item End-to-end tests for multi-module and multi-user scenarios
-  \item Consolidate experiment data and screenshots; complete final report and defence materials
-  \item Deliverable: demonstrable three-module (Bird Nest / Oil Leak / Infrared) SaaS prototype
+  \item End-to-end multi-user testing
+  \item \textbf{Final Deliverable:} 3-Module SaaS Prototype + Thesis Report
 \end{itemize}
 \end{block}
 \end{frame}

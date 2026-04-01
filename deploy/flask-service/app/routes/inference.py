@@ -8,6 +8,8 @@ from uuid import uuid4
 
 from flask import Blueprint, current_app, jsonify, request, session
 from PIL import Image
+import concurrent.futures
+import io
 
 from app.models import AIModel, InferenceReport, InferenceTask, db
 from app.services.model_service import (
@@ -17,6 +19,8 @@ from app.services.model_service import (
 )
 
 inference_bp = Blueprint("inference", __name__, url_prefix="/inference")
+
+executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
 BIRD_NEST_MODEL_NAME = "Bird Nest Detection"
 OIL_LEAK_MODEL_NAME = "Oil Leak Detection"
 OIL_LEAK_DEFAULT_CONFIDENCE = 0.35
@@ -49,7 +53,8 @@ def _resolve_weights_path(model: AIModel) -> Path:
 
 
 def _is_bird_nest_model(model: AIModel) -> bool:
-    return model.name == BIRD_NEST_MODEL_NAME
+    name = (model.name or "").strip().lower()
+    return "bird" in name and "nest" in name
 
 
 def _is_oil_leak_model(model: AIModel) -> bool:
@@ -222,7 +227,8 @@ def _get_runner_for_model(model: AIModel):
 @inference_bp.get("/history")
 def get_inference_history():
     user_id = session.get("user_id")
-    if not user_id:
+    tenant_id = session.get("tenant_id")
+    if not user_id or not tenant_id:
         return jsonify({"error": "authentication required"}), 401
 
     reports = (
@@ -249,7 +255,8 @@ def get_inference_history():
 @inference_bp.get("/history/<int:report_id>")
 def get_inference_report_detail(report_id: int):
     user_id = session.get("user_id")
-    if not user_id:
+    tenant_id = session.get("tenant_id")
+    if not user_id or not tenant_id:
         return jsonify({"error": "authentication required"}), 401
 
     report = InferenceReport.query.filter_by(id=report_id, user_id=user_id).first()
@@ -323,7 +330,8 @@ def _predict_with_fallback(model: AIModel, pil_image: Image.Image, threshold: fl
 @inference_bp.post("/batch")
 def create_batch_inference_report():
     user_id = session.get("user_id")
-    if not user_id:
+    tenant_id = session.get("tenant_id")
+    if not user_id or not tenant_id:
         return jsonify({"error": "authentication required"}), 401
 
     model_id = request.form.get("model_id", type=int)
@@ -420,7 +428,7 @@ def create_batch_inference_report():
             f"{item_result['summary']['detections']} detections by {model.name}"
         )
         db.session.add(
-            InferenceTask(user_id=user_id, model_id=model.id, result_summary=task_summary)
+            InferenceTask(tenant_id=tenant_id, user_id=user_id, model_id=model.id, result_summary=task_summary)
         )
 
     summary, detail_payload = _build_report_detail_payload(
@@ -432,6 +440,7 @@ def create_batch_inference_report():
         weights_path=str(weights_path),
     )
     report = InferenceReport(
+        tenant_id=tenant_id,
         user_id=user_id,
         model_name=model_name,
         summary=summary,
@@ -457,7 +466,8 @@ def create_batch_inference_report():
 @inference_bp.post("/reports")
 def create_inference_report_from_payload():
     user_id = session.get("user_id")
-    if not user_id:
+    tenant_id = session.get("tenant_id")
+    if not user_id or not tenant_id:
         return jsonify({"error": "authentication required"}), 401
 
     payload = request.get_json(silent=True) or {}
@@ -488,6 +498,7 @@ def create_inference_report_from_payload():
         weights_path=str(_resolve_weights_path(model)) if not _is_infrared_model(model) else "hybrid://infrared",
     )
     report = InferenceReport(
+        tenant_id=tenant_id,
         user_id=user_id,
         model_name=model.name,
         summary=summary,
@@ -511,7 +522,8 @@ def create_inference_report_from_payload():
 @inference_bp.post("/tasks")
 def create_inference_task():
     user_id = session.get("user_id")
-    if not user_id:
+    tenant_id = session.get("tenant_id")
+    if not user_id or not tenant_id:
         return jsonify({"error": "authentication required"}), 401
 
     model_id = request.form.get("model_id", type=int)
@@ -525,82 +537,121 @@ def create_inference_task():
         return jsonify({"error": "model not found"}), 404
     if model.status != "Active":
         return jsonify({"error": "selected model is inactive"}), 400
+    
     image_file = request.files["image"]
+    image_bytes = image_file.read()
+    filename = image_file.filename or "image.jpg"
+    
     temperature_threshold = (
         request.form.get("temperature_threshold", type=float)
         or request.args.get("temperature_threshold", type=float)
         or 50.0
     )
-
     confidence = (
         request.form.get("confidence", type=float)
         or request.args.get("confidence", type=float)
     )
     threshold = confidence if confidence is not None else _default_confidence_for_model(model)
 
-    if _is_infrared_model(model):
-        weights_path = Path("hybrid://infrared")
-        suffix = Path(image_file.filename or "image.jpg").suffix or ".jpg"
-        tmp_path: str | None = None
-        try:
-            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp_file:
-                image_file.save(tmp_file.name)
-                tmp_path = tmp_file.name
-            result = run_infrared_hybrid_detection(
-                image_path=tmp_path, alarm_temp=float(temperature_threshold)
-            )
-        except Exception as exc:  # pragma: no cover
-            current_app.logger.exception("Failed to process infrared image")
-            return jsonify({"error": f"infrared detection failed: {exc}"}), 400
-        finally:
-            if tmp_path:
-                try:
-                    Path(tmp_path).unlink(missing_ok=True)
-                except Exception:
-                    pass
-    else:
-        try:
-            weights_path = _resolve_weights_path(model)
-            _get_runner_for_model(model)
-        except (FileNotFoundError, ValueError) as exc:
-            return jsonify({"error": str(exc)}), 400
-
-        try:
-            pil_image = Image.open(image_file.stream).convert("RGB")
-        except Exception as exc:  # pragma: no cover
-            current_app.logger.exception("Failed to parse uploaded image")
-            return jsonify({"error": f"invalid image: {exc}"}), 400
-
-        result = _predict_with_fallback(model, pil_image, threshold)
-
-    predictions = result["predictions"]
-    annotated_b64 = result["annotated_image"]
-
-    summary = f"{len(predictions)} detections by {model.name}"
     task = InferenceTask(
+        tenant_id=tenant_id,
         user_id=user_id,
         model_id=model.id,
-        result_summary=summary,
+        status="PENDING"
     )
     db.session.add(task)
     db.session.commit()
 
-    return jsonify(
-        {
-            "task": {
-                "id": task.id,
-                "user_id": task.user_id,
-                "model_id": task.model_id,
-                "result_summary": task.result_summary,
-                "created_at": task.created_at.isoformat(),
-            },
-            "model": {"id": model.id, "name": model.name, "type": model.type},
-            "predictions": predictions,
-            "annotated_image": annotated_b64,
-            "annotated_image_url": result["annotated_image_url"],
-            "confidence_threshold": result["confidence_threshold"],
-            "summary": result["summary"],
-            "weights_path": str(weights_path),
-            "fallback": result["fallback"],
-        }
+    # Dispatch to background thread
+    app = current_app._get_current_object()
+    executor.submit(
+        _background_inference_worker,
+        app, task.id, model.id, image_bytes, filename, threshold, temperature_threshold
     )
+
+    return jsonify({
+        "task": {
+            "id": task.id,
+            "status": task.status
+        }
+    }), 202
+
+def _background_inference_worker(app, task_id, model_id, image_bytes, filename, threshold, temperature_threshold):
+    with app.app_context():
+        try:
+            task = InferenceTask.query.get(task_id)
+            if not task:
+                return
+            model = AIModel.query.get(model_id)
+            
+            if _is_infrared_model(model):
+                weights_path = Path("hybrid://infrared")
+                suffix = Path(filename).suffix or ".jpg"
+                tmp_path = None
+                try:
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp_file:
+                        tmp_file.write(image_bytes)
+                        tmp_path = tmp_file.name
+                    result = run_infrared_hybrid_detection(
+                        image_path=tmp_path, alarm_temp=float(temperature_threshold)
+                    )
+                finally:
+                    if tmp_path:
+                        try:
+                            Path(tmp_path).unlink(missing_ok=True)
+                        except Exception:
+                            pass
+            else:
+                weights_path = _resolve_weights_path(model)
+                pil_image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+                result = _predict_with_fallback(model, pil_image, threshold)
+
+            result_payload = {
+                "predictions": result["predictions"],
+                "annotated_image": result["annotated_image"],
+                "annotated_image_url": result["annotated_image_url"],
+                "confidence_threshold": result["confidence_threshold"],
+                "summary": result["summary"],
+                "weights_path": str(weights_path),
+                "fallback": result["fallback"],
+            }
+            task.result_summary = json.dumps(result_payload)
+            task.status = "SUCCESS"
+            db.session.commit()
+            
+        except Exception as exc:
+            app.logger.exception("Background task failed")
+            task = InferenceTask.query.get(task_id)
+            if task:
+                task.status = "FAILED"
+                task.result_summary = str(exc)
+                db.session.commit()
+
+@inference_bp.get("/tasks/<int:task_id>/status")
+def get_task_status(task_id):
+    user_id = session.get("user_id")
+    tenant_id = session.get("tenant_id")
+    if not user_id or not tenant_id:
+        return jsonify({"error": "authentication required"}), 401
+        
+    task = InferenceTask.query.filter_by(id=task_id, tenant_id=tenant_id).first()
+    if not task:
+        return jsonify({"error": "task not found"}), 404
+        
+    response_data = {
+        "task": {
+            "id": task.id,
+            "status": task.status
+        }
+    }
+    
+    if task.status == "SUCCESS":
+        try:
+            result_payload = json.loads(task.result_summary)
+            response_data.update(result_payload)
+        except Exception:
+            pass
+    elif task.status == "FAILED":
+        response_data["error"] = task.result_summary
+        
+    return jsonify(response_data)
