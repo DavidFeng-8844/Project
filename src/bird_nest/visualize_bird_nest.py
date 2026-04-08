@@ -1,9 +1,22 @@
 """
-Visualization script for bird nest detection using trained Mask R-CNN model
+Evaluation & visualization script for bird nest detection (Mask R-CNN).
+
+Generates the following plots:
+  1. loss_curves.png             – Training / validation loss over epochs
+  2. pr_curve_bbox_ap50.png      – Precision-Recall curve (bbox, IoU ≥ 0.50)
+  3. pr_curve_segm_ap50.png      – Precision-Recall curve (mask, IoU ≥ 0.50)
+  4. iou_hist_bbox.png           – IoU distribution histogram (bbox)
+  5. iou_hist_mask.png           – IoU distribution histogram (mask)
+  6. threshold_sweep_bbox.png    – Precision / Recall / F1 vs confidence threshold (bbox)
 """
 
 import json
+import random
 from pathlib import Path
+
+import numpy as np
+import matplotlib.pyplot as plt
+import pandas as pd
 import torch
 import torchvision
 torchvision.disable_beta_transforms_warning()
@@ -12,339 +25,435 @@ import torchvision.transforms.v2 as transforms
 from torchvision.models.detection import maskrcnn_resnet50_fpn_v2
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 from torchvision.models.detection.mask_rcnn import MaskRCNNPredictor
-from torchvision.utils import draw_bounding_boxes, draw_segmentation_masks
-import torch.nn.functional as F
+from torchvision.ops import box_iou
+from tqdm.auto import tqdm
 from PIL import Image
-import matplotlib.pyplot as plt
-import numpy as np
-from distinctipy import distinctipy
-import pandas as pd
 
-from windows_utils import create_polygon_mask
-from cjm_pytorch_utils.core import get_torch_device, tensor_to_pil, move_data_to_device
-from cjm_pil_utils.core import resize_img, stack_imgs
+from windows_utils import COCODataset, tuple_batch, create_polygon_mask
+from cjm_pytorch_utils.core import get_torch_device, set_seed, move_data_to_device
+from cjm_pil_utils.core import resize_img
+from cjm_torchvision_tfms.core import ResizeMax, PadSquare
 
-# Set device
-device = get_torch_device()
-dtype = torch.float32
-print(f"Using device: {device}")
-
-# Paths
+# ──────────────────────────────────────────────
+# 0. Paths & setup
+# ──────────────────────────────────────────────
 repo_root = Path(__file__).resolve().parent.parent.parent
 dataset_dir = repo_root / "data" / "active" / "bird_nest" / "coco"
 coco_json_path = dataset_dir / "dataset.json"
 image_dir = dataset_dir
 
-# Load COCO JSON
-with open(coco_json_path, 'r', encoding='utf-8') as f:
+output_dir = repo_root / "experiments" / "visualizations"
+output_dir.mkdir(parents=True, exist_ok=True)
+
+device = torch.device(get_torch_device())
+print(f"Using device: {device}")
+
+# ──────────────────────────────────────────────
+# 1. Load COCO annotations & class names
+# ──────────────────────────────────────────────
+with open(coco_json_path, "r", encoding="utf-8") as f:
     coco_data = json.load(f)
 
-# Get class names
-class_names = ['background'] + [cat['name'] for cat in coco_data['categories']]
+class_names = ["background"] + [cat["name"] for cat in coco_data["categories"]]
+class_to_idx = {c: i for i, c in enumerate(class_names)}
 print(f"Classes: {class_names}")
 
-# Load color map if available, otherwise generate
-color_map_path = None
-# Try to find the most recent checkpoint directory
-checkpoint_dirs = sorted(
-    (repo_root / "experiments" / "pytorch-mask-r-cnn-bird-nest").glob("*"),
-    reverse=True,
-)
-if checkpoint_dirs:
-    color_map_path = checkpoint_dirs[0] / "bird_nest-colormap.json"
+# ──────────────────────────────────────────────
+# 2. Find the best checkpoint & history
+# ──────────────────────────────────────────────
+project_dir = repo_root / "experiments" / "pytorch-mask-r-cnn-bird-nest"
+run_dirs = sorted([p for p in project_dir.glob("*") if p.is_dir()], reverse=True)
 
-if color_map_path and color_map_path.exists():
-    with open(color_map_path, 'r') as f:
-        color_map_data = json.load(f)
-    colors = [item['color'] for item in color_map_data['items']]
-    # Convert to RGB int tuples
-    int_colors = []
-    for color in colors:
-        if isinstance(color, (list, tuple)) and len(color) >= 3:
-            # If colors are floats in [0,1], scale to [0,255]
-            if all(isinstance(ch, float) and ch <= 1 for ch in color[:3]):
-                int_colors.append(tuple(int(round(ch * 255)) for ch in color[:3]))
-            else:
-                int_colors.append(tuple(int(ch) for ch in color[:3]))
-        else:
-            int_colors.append((255, 0, 0))
-else:
-    # Generate colors as RGB int tuples
-    colors = distinctipy.get_colors(len(class_names))
-    int_colors = [tuple(int(round(ch * 255)) for ch in color[:3]) for color in colors]
-
-# Load model
-def load_model(checkpoint_path, num_classes, device):
-    """Load trained model from checkpoint"""
-    model = maskrcnn_resnet50_fpn_v2(weights=None)  # Don't load pretrained weights
-    
-    in_features_box = model.roi_heads.box_predictor.cls_score.in_features
-    in_features_mask = model.roi_heads.mask_predictor.conv5_mask.in_channels
-    dim_reduced = model.roi_heads.mask_predictor.conv5_mask.out_channels
-    
-    model.roi_heads.box_predictor = FastRCNNPredictor(in_features_box, num_classes=num_classes)
-    model.roi_heads.mask_predictor = MaskRCNNPredictor(in_features_mask, dim_reduced=dim_reduced, 
-                                                        num_classes=num_classes)
-    
-    model.load_state_dict(torch.load(checkpoint_path, map_location=device))
-    model.to(device)
-    model.eval()
-    
-    return model
-
-# Find the most recent checkpoint
 checkpoint_path = None
-if checkpoint_dirs:
-    for checkpoint_dir in checkpoint_dirs:
-        possible_checkpoints = list(checkpoint_dir.glob("*.pth"))
-        if possible_checkpoints:
-            checkpoint_path = possible_checkpoints[0]
-            break
+history_path = None
+for rd in run_dirs:
+    pths = list(rd.glob("*.pth"))
+    hist = rd / "history.jsonl"
+    if pths and hist.exists() and hist.stat().st_size > 0:
+        checkpoint_path = pths[0]
+        history_path = hist
+        break
 
-if checkpoint_path and checkpoint_path.exists():
-    print(f"Loading model from: {checkpoint_path}")
-    model = load_model(checkpoint_path, len(class_names), device)
-else:
-    print("Warning: No checkpoint found. Using pretrained model (will not work well for bird nest detection).")
-    model = maskrcnn_resnet50_fpn_v2(weights='DEFAULT')
-    in_features_box = model.roi_heads.box_predictor.cls_score.in_features
-    in_features_mask = model.roi_heads.mask_predictor.conv5_mask.in_channels
-    dim_reduced = model.roi_heads.mask_predictor.conv5_mask.out_channels
-    model.roi_heads.box_predictor = FastRCNNPredictor(in_features_box, num_classes=len(class_names))
-    model.roi_heads.mask_predictor = MaskRCNNPredictor(in_features_mask, dim_reduced=dim_reduced, 
-                                                        num_classes=len(class_names))
-    model.to(device)
-    model.eval()
+if checkpoint_path is None:
+    raise FileNotFoundError("No checkpoint with history found under " + str(project_dir))
 
-# Fixed colors for clarity
-GT_COLOR = (0, 255, 0)      # Green for ground truth
-PRED_COLOR = (255, 0, 0)    # Red for predictions
+print(f"Checkpoint : {checkpoint_path}")
+print(f"History    : {history_path}")
 
-# Simple horizontal stack to avoid huge figures
-from PIL import ImageDraw
+# ──────────────────────────────────────────────
+# 3. Load model
+# ──────────────────────────────────────────────
+num_classes = len(class_names)
+model = maskrcnn_resnet50_fpn_v2(weights=None)
+in_features_box = model.roi_heads.box_predictor.cls_score.in_features
+in_features_mask = model.roi_heads.mask_predictor.conv5_mask.in_channels
+dim_reduced = model.roi_heads.mask_predictor.conv5_mask.out_channels
+model.roi_heads.box_predictor = FastRCNNPredictor(in_features_box, num_classes=num_classes)
+model.roi_heads.mask_predictor = MaskRCNNPredictor(in_features_mask, dim_reduced=dim_reduced,
+                                                    num_classes=num_classes)
+model.load_state_dict(torch.load(checkpoint_path, map_location=device))
+model.to(device)
+model.eval()
+print("Model loaded ✓")
 
-def stack_horiz(imgs):
-    if not imgs:
-        return None
-    widths, heights = zip(*(im.size for im in imgs))
-    total_w = sum(widths)
-    max_h = max(heights)
-    canvas = Image.new('RGB', (total_w, max_h), (0, 0, 0))
-    x = 0
-    for im in imgs:
-        canvas.paste(im, (x, 0))
-        x += im.size[0]
-    # draw a small legend
-    draw = ImageDraw.Draw(canvas)
-    legend_y = 10
-    draw.rectangle([10, legend_y, 30, legend_y+10], fill=GT_COLOR)
-    draw.text((35, legend_y-4), "GT", fill=(255,255,255))
-    draw.rectangle([80, legend_y, 100, legend_y+10], fill=PRED_COLOR)
-    draw.text((105, legend_y-4), "Pred", fill=(255,255,255))
-    return canvas
+# ──────────────────────────────────────────────
+# 4. Build validation dataset (deterministic split – same seed as training)
+# ──────────────────────────────────────────────
+train_sz = 512
+set_seed(1234)
+all_img_ids = [img["id"] for img in coco_data["images"]]
+random.shuffle(all_img_ids)
+train_split = int(len(all_img_ids) * 0.8)
+val_img_ids = all_img_ids[train_split:]
 
-# Visualization function
-def visualize_predictions(image_path, model, class_names, int_colors, device, threshold=0.5, train_sz=512, display_max=1600):
-    """
-    Visualize predictions on an image (drawn on a downscaled display image to save memory)
-    """
-    # Load original image
-    test_img = Image.open(image_path).convert('RGB')
-    
-    # Prepare model input (small)
-    input_img = resize_img(test_img, target_sz=train_sz, divisor=1)
-    input_tensor = transforms.Compose([
-        transforms.ToImage(),
-        transforms.ToDtype(torch.float32, scale=True)
-    ])(input_img)[None].to(device)
-    
-    # Prepare display image (moderate size)
-    display_img = resize_img(test_img, target_sz=display_max, divisor=1)
-    
-    # Scale from model input space -> display space
-    scale_inp_to_disp = min(display_img.size) / min(input_img.size)
-    
-    # Run model
-    with torch.no_grad():
-        model_output = model(input_tensor)
-    
-    # Move output to CPU
-    model_output = [move_data_to_device(output, 'cpu') for output in model_output][0]
-    
-    # Filter by confidence threshold
-    scores_mask = model_output['scores'] > threshold
-    if scores_mask.sum() == 0:
-        return display_img, None
-    
-    # Boxes scaled to display image
-    pred_bboxes = BoundingBoxes(
-        model_output['boxes'][scores_mask] * scale_inp_to_disp,
-        format='xyxy',
-        canvas_size=display_img.size[::-1]
-    )
-    pred_labels = [class_names[int(label)] for label in model_output['labels'][scores_mask]]
-    pred_scores = model_output['scores'][scores_mask]
-    
-    # Masks scaled to display image
-    pred_masks = F.interpolate(
-        model_output['masks'][scores_mask],
-        size=display_img.size[::-1],
-        mode='bilinear',
-        align_corners=False
-    )
-    pred_masks = torch.concat([
-        Mask(torch.where(mask >= 0.5, 1, 0), dtype=torch.bool)
-        for mask in pred_masks
-    ])
-    
-    # Colors
-    pred_colors = [PRED_COLOR for _ in pred_labels]
-    
-    # Draw
-    img_tensor = transforms.PILToTensor()(display_img)
-    annotated_tensor = draw_segmentation_masks(
-        image=img_tensor,
-        masks=pred_masks,
-        alpha=0.3,
-        colors=pred_colors
-    )
-    labels_with_scores = [f"{label}\n{prob*100:.1f}%" for label, prob in zip(pred_labels, pred_scores)]
-    annotated_tensor = draw_bounding_boxes(
-        image=annotated_tensor,
-        boxes=pred_bboxes,
-        labels=labels_with_scores,
-        colors=pred_colors,
-        fill=False,
-        width=2
-    )
-    
-    annotated_img = tensor_to_pil(annotated_tensor)
-    return display_img, annotated_img
+resize_max = ResizeMax(max_sz=train_sz)
+pad_square = PadSquare(shift=False, fill=0)
 
-# Get ground truth annotations for comparison
-def get_ground_truth(image_id, coco_data, image_dir):
-    """Get ground truth annotations for an image"""
-    img_info = next((img for img in coco_data['images'] if img['id'] == image_id), None)
-    if not img_info:
-        return None, None
-    
-    # Get image path
-    file_name = Path(img_info['file_name']).name
-    image_path = image_dir / file_name
-    if not image_path.exists():
-        possible_files = list(image_dir.glob(f"{Path(file_name).stem}.*"))
-        if possible_files:
-            image_path = possible_files[0]
-        else:
-            return None, None
-    
-    # Get annotations
-    annotations = [ann for ann in coco_data['annotations'] if ann['image_id'] == image_id]
-    
-    return image_path, annotations
+val_tfms = transforms.Compose([
+    resize_max, pad_square,
+    transforms.Resize([train_sz] * 2, antialias=True),
+    transforms.ToImage(),
+    transforms.ToDtype(torch.float32, scale=True),
+    transforms.SanitizeBoundingBoxes(),
+])
 
-# Visualize a specific image
-def visualize_with_ground_truth(image_id, coco_data, image_dir, model, class_names, int_colors, device, train_sz=512, display_max=1600):
-    """Visualize both predictions and ground truth on a downscaled display image"""
-    image_path, annotations = get_ground_truth(image_id, coco_data, image_dir)
-    if image_path is None:
-        return None
-    
-    test_img = Image.open(image_path).convert('RGB')
-    display_img = resize_img(test_img, target_sz=display_max, divisor=1)
-    
-    # Build GT on display image
-    if annotations:
-        gt_mask_imgs = []
-        gt_labels = []
-        for ann in annotations:
-            segmentation = ann.get('segmentation')
-            if isinstance(segmentation, list) and len(segmentation) > 0:
-                polygon_points = segmentation[0]
-                xy_coords = [(polygon_points[i], polygon_points[i+1]) for i in range(0, len(polygon_points), 2)]
-                # draw mask on original size then resize to display
-                mask_img = create_polygon_mask(test_img.size, xy_coords)
-                # resize mask to display size
-                mask_img = mask_img.resize(display_img.size, resample=Image.NEAREST)
-                gt_mask_imgs.append(mask_img)
-                
-                category_id = ann['category_id']
-                category_name = next((cat['name'] for cat in coco_data['categories'] if cat['id'] == category_id), 'unknown')
-                gt_labels.append(category_name)
-        
-        if gt_mask_imgs:
-            gt_masks = Mask(torch.concat([Mask(transforms.PILToTensor()(m), dtype=torch.bool) for m in gt_mask_imgs]))
-            gt_bboxes = BoundingBoxes(
-                data=torchvision.ops.masks_to_boxes(gt_masks),
-                format='xyxy',
-                canvas_size=display_img.size[::-1]
-            )
-            gt_colors = [GT_COLOR for _ in gt_labels]
-            img_tensor = transforms.PILToTensor()(display_img)
-            gt_annotated = draw_segmentation_masks(image=img_tensor, masks=gt_masks, alpha=0.3, colors=gt_colors)
-            gt_annotated = draw_bounding_boxes(image=gt_annotated, boxes=gt_bboxes, labels=gt_labels, colors=gt_colors, fill=False, width=2)
-            gt_img = tensor_to_pil(gt_annotated)
-        else:
-            gt_img = display_img
-    else:
-        gt_img = display_img
-    
-    # Predictions on display image
-    _, pred_img = visualize_predictions(image_path, model, class_names, int_colors, device, train_sz=train_sz, display_max=display_max)
-    
-    if pred_img:
-        # Stack downscaled images side by side with legend
-        return stack_horiz([gt_img, pred_img])
-    else:
-        return gt_img
+val_dataset = COCODataset(coco_json_path, image_dir, class_to_idx, val_tfms, img_ids=val_img_ids)
+val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=1, shuffle=False,
+                                          collate_fn=tuple_batch, num_workers=0)
+print(f"Validation images: {len(val_dataset)}")
 
-# Main visualization
-if __name__ == "__main__":
-    all_image_ids = list(set([ann['image_id'] for ann in coco_data['annotations']]))
-    print(f"\nFound {len(all_image_ids)} images with annotations")
-    print("Visualizing predictions on all images...\n")
-    
-    output_dir = repo_root / "experiments" / "visualizations"
-    output_dir.mkdir(parents=True, exist_ok=True)
-    
-    for image_id in all_image_ids:
-        result_img = visualize_with_ground_truth(image_id, coco_data, image_dir, model, class_names, int_colors, device)
-        if result_img:
-            out_path = output_dir / f"image_{image_id}.png"
-            result_img.save(out_path)
-            print(f"Saved: {out_path}")
 
-    # Optionally export loss curves if training history exists
-    try:
-        project_dir = repo_root / "experiments" / "pytorch-mask-r-cnn-bird-nest"
-        run_dirs = sorted([p for p in project_dir.glob('*') if p.is_dir()], reverse=True)
-        selected = None
-        for rd in run_dirs:
-            hp = rd / 'history.jsonl'
-            if hp.exists() and hp.stat().st_size > 0:
-                selected = rd
-                break
-        if selected is not None:
-            history_path = selected / 'history.jsonl'
-            with open(history_path, 'r', encoding='utf-8') as f:
-                lines = [json.loads(line) for line in f if line.strip()]
-            if lines:
-                hist_df = pd.DataFrame(lines)
-                plt.figure(figsize=(8,4))
-                plt.plot(hist_df['epoch'], hist_df['train_loss'], label='Train Loss', marker='o')
-                plt.plot(hist_df['epoch'], hist_df['valid_loss'], label='Valid Loss', marker='o')
-                plt.xlabel('Epoch')
-                plt.ylabel('Loss')
-                plt.title(f'Loss Curves - {selected.name}')
-                plt.grid(True, alpha=0.3)
-                plt.legend()
-                out_path = output_dir / 'loss_curves.png'
-                plt.tight_layout()
-                plt.savefig(out_path, dpi=200)
-                plt.close()
-                print(f"Saved: {out_path}")
-        else:
-            print("Skip loss curves: no run with non-empty history.jsonl found. Re-run training after logging was added.")
-    except Exception as e:
-        print(f"Warning: could not export loss curves: {e}")
+# ──────────────────────────────────────────────
+# Helper: compute mask IoU
+# ──────────────────────────────────────────────
+def mask_iou(pred_mask: torch.Tensor, gt_mask: torch.Tensor) -> float:
+    """Compute IoU between two boolean masks (H, W)."""
+    pred = pred_mask.bool().flatten()
+    gt   = gt_mask.bool().flatten()
+    intersection = (pred & gt).sum().float()
+    union = (pred | gt).sum().float()
+    return (intersection / union).item() if union > 0 else 0.0
 
+
+# ──────────────────────────────────────────────
+# 5. Run inference and collect per-detection results
+# ──────────────────────────────────────────────
+print("Running inference on validation set …")
+
+all_scores      = []   # confidence of every prediction
+all_bbox_ious   = []   # best IoU (bbox) of every prediction with GT
+all_mask_ious   = []   # best IoU (mask) of every prediction with GT
+all_tp_bbox     = []   # 1 if true positive (bbox IoU ≥ 0.5), else 0
+all_tp_mask     = []   # 1 if true positive (mask IoU ≥ 0.5), else 0
+total_gt_boxes  = 0    # total ground-truth objects
+
+with torch.no_grad():
+    for inputs, targets in tqdm(val_loader, desc="Eval"):
+        imgs = torch.stack(inputs).to(device)
+        outputs = model(imgs)
+
+        for out, tgt in zip(outputs, targets):
+            gt_boxes  = tgt["boxes"].to("cpu")
+            gt_masks  = tgt["masks"].to("cpu")
+            gt_labels = tgt["labels"].to("cpu")
+
+            # skip images with 0 GT (negative samples contribute 0 GT)
+            n_gt = gt_boxes.shape[0]
+            total_gt_boxes += n_gt
+
+            pred_boxes  = out["boxes"].cpu()
+            pred_scores = out["scores"].cpu()
+            pred_masks  = (out["masks"].cpu() >= 0.5).squeeze(1)  # (N, H, W)
+
+            # Only keep foreground predictions (label > 0)
+            pred_labels = out["labels"].cpu()
+            fg_mask = pred_labels > 0
+            pred_boxes  = pred_boxes[fg_mask]
+            pred_scores = pred_scores[fg_mask]
+            pred_masks  = pred_masks[fg_mask]
+
+            if pred_boxes.shape[0] == 0:
+                continue
+
+            if n_gt == 0:
+                # All predictions are FP
+                for s in pred_scores.tolist():
+                    all_scores.append(s)
+                    all_bbox_ious.append(0.0)
+                    all_mask_ious.append(0.0)
+                    all_tp_bbox.append(0)
+                    all_tp_mask.append(0)
+                continue
+
+            # Compute bbox IoU matrix (N_pred × N_gt)
+            iou_matrix = box_iou(pred_boxes, gt_boxes)
+
+            # Compute mask IoU matrix
+            mask_iou_matrix = torch.zeros(pred_masks.shape[0], n_gt)
+            for pi in range(pred_masks.shape[0]):
+                for gi in range(n_gt):
+                    mask_iou_matrix[pi, gi] = mask_iou(pred_masks[pi], gt_masks[gi])
+
+            # Greedy matching (highest IoU first)
+            matched_gt_bbox = set()
+            matched_gt_mask = set()
+
+            # Sort predictions by score descending
+            order = pred_scores.argsort(descending=True)
+            for idx in order:
+                idx = idx.item()
+                score = pred_scores[idx].item()
+                best_bbox_iou, best_bbox_gi = iou_matrix[idx].max(0)
+                best_mask_iou_val, best_mask_gi = mask_iou_matrix[idx].max(0)
+
+                best_bbox_iou = best_bbox_iou.item()
+                best_bbox_gi  = best_bbox_gi.item()
+                best_mask_iou_val = best_mask_iou_val.item()
+                best_mask_gi  = best_mask_gi.item()
+
+                # bbox TP?
+                tp_b = 0
+                if best_bbox_iou >= 0.5 and best_bbox_gi not in matched_gt_bbox:
+                    tp_b = 1
+                    matched_gt_bbox.add(best_bbox_gi)
+
+                # mask TP?
+                tp_m = 0
+                if best_mask_iou_val >= 0.5 and best_mask_gi not in matched_gt_mask:
+                    tp_m = 1
+                    matched_gt_mask.add(best_mask_gi)
+
+                all_scores.append(score)
+                all_bbox_ious.append(best_bbox_iou)
+                all_mask_ious.append(best_mask_iou_val)
+                all_tp_bbox.append(tp_b)
+                all_tp_mask.append(tp_m)
+
+all_scores    = np.array(all_scores)
+all_bbox_ious = np.array(all_bbox_ious)
+all_mask_ious = np.array(all_mask_ious)
+all_tp_bbox   = np.array(all_tp_bbox)
+all_tp_mask   = np.array(all_tp_mask)
+
+print(f"Total predictions: {len(all_scores)}, Total GT boxes: {total_gt_boxes}")
+
+# ──────────────────────────────────────────────
+# Helper: compute PR curve from sorted TP array
+# ──────────────────────────────────────────────
+def compute_pr_curve(scores, tp_array, total_gt):
+    """Return (precision, recall, ap) sorted by decreasing score."""
+    if len(scores) == 0 or total_gt == 0:
+        return np.array([0.0]), np.array([0.0]), 0.0
+
+    order = np.argsort(-scores)
+    tp_sorted = tp_array[order]
+
+    cum_tp = np.cumsum(tp_sorted)
+    cum_fp = np.cumsum(1 - tp_sorted)
+
+    precision = cum_tp / (cum_tp + cum_fp + 1e-12)
+    recall    = cum_tp / (total_gt + 1e-12)
+
+    # Prepend sentinel (recall=0, precision=1) for proper AP integration
+    recall    = np.concatenate([[0.0], recall])
+    precision = np.concatenate([[1.0], precision])
+
+    # Make precision monotonically decreasing (standard COCO interpolation)
+    for i in range(len(precision) - 2, -1, -1):
+        precision[i] = max(precision[i], precision[i + 1])
+
+    # Compute AP as area under the interpolated PR curve
+    ap = np.sum((recall[1:] - recall[:-1]) * precision[1:])
+
+    return precision, recall, ap
+
+
+# ──────────────────────────────────────────────
+# Style constants
+# ──────────────────────────────────────────────
+plt.rcParams.update({
+    "figure.dpi": 200,
+    "font.size": 11,
+    "axes.titlesize": 13,
+    "axes.labelsize": 12,
+})
+MAIN_COLOR  = "#2563EB"
+SECOND_COLOR = "#F97316"
+THIRD_COLOR  = "#10B981"
+FILL_ALPHA   = 0.25
+
+# ══════════════════════════════════════════════
+# PLOT 1 – Loss Curves
+# ══════════════════════════════════════════════
+print("Plotting loss_curves …")
+with open(history_path, "r", encoding="utf-8") as f:
+    history = [json.loads(line) for line in f if line.strip()]
+
+hist_df = pd.DataFrame(history)
+
+fig, ax = plt.subplots(figsize=(8, 4.5))
+ax.plot(hist_df["epoch"], hist_df["train_loss"], color=MAIN_COLOR,
+        marker="o", markersize=4, linewidth=2, label="Train Loss")
+ax.plot(hist_df["epoch"], hist_df["valid_loss"], color=SECOND_COLOR,
+        marker="s", markersize=4, linewidth=2, label="Valid Loss")
+best_epoch = hist_df.loc[hist_df["valid_loss"].idxmin()]
+ax.axvline(best_epoch["epoch"], color="#EF4444", linestyle="--", linewidth=1,
+           label=f'Best (epoch {int(best_epoch["epoch"])}, val={best_epoch["valid_loss"]:.4f})')
+ax.set_xlabel("Epoch")
+ax.set_ylabel("Loss")
+ax.set_title("Training & Validation Loss Curves")
+ax.legend(frameon=True)
+ax.grid(True, alpha=0.3)
+fig.tight_layout()
+fig.savefig(output_dir / "loss_curves.png")
+plt.close(fig)
+print(f"  ✓ {output_dir / 'loss_curves.png'}")
+
+# ══════════════════════════════════════════════
+# PLOT 2 – PR Curve (BBox, AP50)
+# ══════════════════════════════════════════════
+print("Plotting pr_curve_bbox_ap50 …")
+prec_b, rec_b, ap50_bbox = compute_pr_curve(all_scores, all_tp_bbox, total_gt_boxes)
+
+fig, ax = plt.subplots(figsize=(6, 5))
+ax.plot(rec_b, prec_b, color=MAIN_COLOR, linewidth=2)
+ax.fill_between(rec_b, prec_b, alpha=FILL_ALPHA, color=MAIN_COLOR)
+ax.set_xlabel("Recall")
+ax.set_ylabel("Precision")
+ax.set_title(f"PR Curve – BBox (AP@50 = {ap50_bbox:.3f})")
+ax.set_xlim([0, 1.05])
+ax.set_ylim([0, 1.05])
+ax.grid(True, alpha=0.3)
+fig.tight_layout()
+fig.savefig(output_dir / "pr_curve_bbox_ap50.png")
+plt.close(fig)
+print(f"  ✓ {output_dir / 'pr_curve_bbox_ap50.png'}")
+
+# ══════════════════════════════════════════════
+# PLOT 3 – PR Curve (Segm / Mask, AP50)
+# ══════════════════════════════════════════════
+print("Plotting pr_curve_segm_ap50 …")
+prec_m, rec_m, ap50_mask = compute_pr_curve(all_scores, all_tp_mask, total_gt_boxes)
+
+fig, ax = plt.subplots(figsize=(6, 5))
+ax.plot(rec_m, prec_m, color=THIRD_COLOR, linewidth=2)
+ax.fill_between(rec_m, prec_m, alpha=FILL_ALPHA, color=THIRD_COLOR)
+ax.set_xlabel("Recall")
+ax.set_ylabel("Precision")
+ax.set_title(f"PR Curve – Segm (AP@50 = {ap50_mask:.3f})")
+ax.set_xlim([0, 1.05])
+ax.set_ylim([0, 1.05])
+ax.grid(True, alpha=0.3)
+fig.tight_layout()
+fig.savefig(output_dir / "pr_curve_segm_ap50.png")
+plt.close(fig)
+print(f"  ✓ {output_dir / 'pr_curve_segm_ap50.png'}")
+
+# ══════════════════════════════════════════════
+# PLOT 4 – IoU Histogram (BBox)
+# ══════════════════════════════════════════════
+print("Plotting iou_hist_bbox …")
+fig, ax = plt.subplots(figsize=(7, 4.5))
+if len(all_bbox_ious) > 0:
+    ax.hist(all_bbox_ious, bins=30, range=(0, 1), color=MAIN_COLOR, edgecolor="white",
+            alpha=0.8, label="BBox IoU")
+    mean_iou = all_bbox_ious.mean()
+    ax.axvline(mean_iou, color="#EF4444", linestyle="--", linewidth=1.5,
+               label=f"Mean IoU = {mean_iou:.3f}")
+    ax.axvline(0.5, color="#F59E0B", linestyle=":", linewidth=1.5,
+               label="IoU = 0.50 threshold")
+ax.set_xlabel("IoU")
+ax.set_ylabel("Count")
+ax.set_title("IoU Distribution – Bounding Boxes")
+ax.legend(frameon=True)
+ax.grid(True, alpha=0.3)
+fig.tight_layout()
+fig.savefig(output_dir / "iou_hist_bbox.png")
+plt.close(fig)
+print(f"  ✓ {output_dir / 'iou_hist_bbox.png'}")
+
+# ══════════════════════════════════════════════
+# PLOT 5 – IoU Histogram (Mask)
+# ══════════════════════════════════════════════
+print("Plotting iou_hist_mask …")
+fig, ax = plt.subplots(figsize=(7, 4.5))
+if len(all_mask_ious) > 0:
+    ax.hist(all_mask_ious, bins=30, range=(0, 1), color=THIRD_COLOR, edgecolor="white",
+            alpha=0.8, label="Mask IoU")
+    mean_iou = all_mask_ious.mean()
+    ax.axvline(mean_iou, color="#EF4444", linestyle="--", linewidth=1.5,
+               label=f"Mean IoU = {mean_iou:.3f}")
+    ax.axvline(0.5, color="#F59E0B", linestyle=":", linewidth=1.5,
+               label="IoU = 0.50 threshold")
+ax.set_xlabel("IoU")
+ax.set_ylabel("Count")
+ax.set_title("IoU Distribution – Segmentation Masks")
+ax.legend(frameon=True)
+ax.grid(True, alpha=0.3)
+fig.tight_layout()
+fig.savefig(output_dir / "iou_hist_mask.png")
+plt.close(fig)
+print(f"  ✓ {output_dir / 'iou_hist_mask.png'}")
+
+# ══════════════════════════════════════════════
+# PLOT 6 – Threshold Sweep (BBox)
+# ══════════════════════════════════════════════
+print("Plotting threshold_sweep_bbox …")
+thresholds = np.arange(0.05, 1.0, 0.025)
+sweep_precision = []
+sweep_recall    = []
+sweep_f1        = []
+
+for thr in thresholds:
+    mask = all_scores >= thr
+    if mask.sum() == 0:
+        sweep_precision.append(0.0)
+        sweep_recall.append(0.0)
+        sweep_f1.append(0.0)
+        continue
+    tp = all_tp_bbox[mask].sum()
+    fp = mask.sum() - tp
+    fn = total_gt_boxes - tp
+
+    p = tp / (tp + fp + 1e-12)
+    r = tp / (tp + fn + 1e-12)
+    f1 = 2 * p * r / (p + r + 1e-12)
+    sweep_precision.append(p)
+    sweep_recall.append(r)
+    sweep_f1.append(f1)
+
+sweep_precision = np.array(sweep_precision)
+sweep_recall    = np.array(sweep_recall)
+sweep_f1        = np.array(sweep_f1)
+
+fig, ax = plt.subplots(figsize=(8, 4.5))
+ax.plot(thresholds, sweep_precision, color=MAIN_COLOR, linewidth=2, label="Precision")
+ax.plot(thresholds, sweep_recall,    color=SECOND_COLOR, linewidth=2, label="Recall")
+ax.plot(thresholds, sweep_f1,        color=THIRD_COLOR, linewidth=2, label="F1")
+
+best_f1_idx = sweep_f1.argmax()
+best_thr = thresholds[best_f1_idx]
+ax.axvline(best_thr, color="#EF4444", linestyle="--", linewidth=1.2,
+           label=f"Best F1={sweep_f1[best_f1_idx]:.3f} @ thr={best_thr:.2f}")
+
+ax.set_xlabel("Confidence Threshold")
+ax.set_ylabel("Metric Value")
+ax.set_title("Precision / Recall / F1 vs Confidence Threshold (BBox)")
+ax.set_xlim([0, 1])
+ax.set_ylim([0, 1.05])
+ax.legend(frameon=True, loc="lower left")
+ax.grid(True, alpha=0.3)
+fig.tight_layout()
+fig.savefig(output_dir / "threshold_sweep_bbox.png")
+plt.close(fig)
+print(f"  ✓ {output_dir / 'threshold_sweep_bbox.png'}")
+
+# ──────────────────────────────────────────────
+# Summary
+# ──────────────────────────────────────────────
+print("\n" + "=" * 50)
+print("All plots saved to:", output_dir)
+print(f"  AP@50 (bbox): {ap50_bbox:.4f}")
+print(f"  AP@50 (mask): {ap50_mask:.4f}")
+print(f"  Best F1 threshold (bbox): {best_thr:.2f} (F1={sweep_f1[best_f1_idx]:.4f})")
+print("=" * 50)
