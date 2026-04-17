@@ -345,6 +345,7 @@ def create_batch_inference_report():
         or request.args.get("temperature_threshold", type=float)
         or 50.0
     )
+    disable_suppression = request.form.get("disable_suppression") == "true" or request.args.get("disable_suppression") == "true"
     images = request.files.getlist("images")
     if not images:
         return jsonify({"error": "at least one image is required"}), 400
@@ -389,7 +390,7 @@ def create_batch_inference_report():
                     image_file.save(tmp_file.name)
                     tmp_path = tmp_file.name
                 item_result = run_infrared_hybrid_detection(
-                    image_path=tmp_path, alarm_temp=float(temperature_threshold)
+                    image_path=tmp_path, alarm_temp=float(temperature_threshold), disable_suppression=disable_suppression
                 )
             except Exception as exc:  # pragma: no cover
                 current_app.logger.exception("Failed to parse/process infrared image")
@@ -551,6 +552,7 @@ def create_inference_task():
         request.form.get("confidence", type=float)
         or request.args.get("confidence", type=float)
     )
+    disable_suppression = request.form.get("disable_suppression") == "true" or request.args.get("disable_suppression") == "true"
     threshold = confidence if confidence is not None else _default_confidence_for_model(model)
 
     task = InferenceTask(
@@ -566,7 +568,7 @@ def create_inference_task():
     app = current_app._get_current_object()
     executor.submit(
         _background_inference_worker,
-        app, task.id, model.id, image_bytes, filename, threshold, temperature_threshold
+        app, task.id, model.id, image_bytes, filename, threshold, temperature_threshold, disable_suppression
     )
 
     return jsonify({
@@ -576,7 +578,7 @@ def create_inference_task():
         }
     }), 202
 
-def _background_inference_worker(app, task_id, model_id, image_bytes, filename, threshold, temperature_threshold):
+def _background_inference_worker(app, task_id, model_id, image_bytes, filename, threshold, temperature_threshold, disable_suppression=False):
     with app.app_context():
         try:
             task = InferenceTask.query.get(task_id)
@@ -593,7 +595,7 @@ def _background_inference_worker(app, task_id, model_id, image_bytes, filename, 
                         tmp_file.write(image_bytes)
                         tmp_path = tmp_file.name
                     result = run_infrared_hybrid_detection(
-                        image_path=tmp_path, alarm_temp=float(temperature_threshold)
+                        image_path=tmp_path, alarm_temp=float(temperature_threshold), disable_suppression=disable_suppression
                     )
                 finally:
                     if tmp_path:

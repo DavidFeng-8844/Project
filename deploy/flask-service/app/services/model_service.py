@@ -233,23 +233,27 @@ def _build_border_watermark_mask(image_bgr: np.ndarray) -> np.ndarray:
     return mask
 
 
-def run_infrared_hybrid_detection(
-    image_path: str | Path, alarm_temp: float = 50.0
-) -> dict[str, Any]:
+def run_infrared_hybrid_detection(image_path: str | Path, alarm_temp: float = 50.0, disable_suppression: bool = False) -> dict[str, Any]:
     """
     Infrared hybrid detection based on OCR-extracted temperature scale + pixel mapping.
     Returns the same top-level structure as existing SaaS inference output.
     """
+    import time
     source_path = str(image_path)
+    t_start = time.perf_counter()
     image_bgr = cv2.imread(source_path, cv2.IMREAD_COLOR)
     if image_bgr is None:
         raise ValueError(f"unable to read image: {source_path}")
-
     gray = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY)
+    t_load = time.perf_counter()
+
     temp_high, temp_low, text_mask = _extract_temperature_range_and_text_mask(
         source_path, gray.shape
     )
+    t_ocr = time.perf_counter()
     watermark_mask = _build_border_watermark_mask(image_bgr)
+    t_mask = time.perf_counter()
+    
     annotated = image_bgr.copy()
     predictions: list[dict[str, Any]] = []
     hotspot_temperatures: list[float] = []
@@ -262,23 +266,41 @@ def run_infrared_hybrid_detection(
 
         _, binary = cv2.threshold(gray, pixel_threshold, 255, cv2.THRESH_BINARY)
         # Remove OCR text/legend regions to prevent white digits from false positives.
-        if text_mask is not None and text_mask.any():
-            binary[text_mask > 0] = 0
-        if watermark_mask is not None and watermark_mask.any():
-            binary[watermark_mask > 0] = 0
+        if not disable_suppression:
+            if text_mask is not None and text_mask.any():
+                binary[text_mask > 0] = 0
+            if watermark_mask is not None and watermark_mask.any():
+                binary[watermark_mask > 0] = 0
+            
+        t_mapping = time.perf_counter()
+        
         img_h, img_w = gray.shape
         contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        t_components = time.perf_counter()
+        
         overlay = annotated.copy()
 
         for contour in contours:
             x, y, w, h = cv2.boundingRect(contour)
-            if w * h < 25 or (w >= img_w * 0.4 and h >= img_h * 0.4):
+            if w * h < 25 or (w >= img_w * 0.85 and h >= img_h * 0.85):
                 continue
 
             x2 = x + w
             y2 = y + h
-            roi = gray[y:y2, x:x2]
-            hotspot_pixel = int(np.max(roi)) if roi.size > 0 else pixel_threshold
+            
+            # Create a precise mask for just THIS contour to find its true max temperature
+            # using the bounding box is inaccurate because the box might overlap with white OCR text.
+            c_mask = np.zeros((img_h, img_w), dtype=np.uint8)
+            cv2.fillPoly(c_mask, [contour], 255)
+            # Remove any globally masked out areas (like OCR text or watermarks)
+            if text_mask is not None and text_mask.any():
+                c_mask[text_mask > 0] = 0
+            if watermark_mask is not None and watermark_mask.any():
+                c_mask[watermark_mask > 0] = 0
+                
+            _, max_val, _, _ = cv2.minMaxLoc(gray, mask=c_mask)
+            
+            hotspot_pixel = float(max_val) if max_val > 0 else pixel_threshold
             hotspot_temp = temp_low + (hotspot_pixel / 255.0) * (temp_high - temp_low)
             hotspot_temp = float(np.clip(hotspot_temp, temp_low, temp_high))
             hotspot_temperatures.append(hotspot_temp)
@@ -306,6 +328,20 @@ def run_infrared_hybrid_detection(
             )
 
         cv2.addWeighted(overlay, 0.45, annotated, 0.55, 0, annotated)
+    else:
+        t_mapping = t_components = time.perf_counter()
+
+    t_vis = time.perf_counter()
+
+    latency_breakdown = {
+        "Image Loading": f"{(t_load - t_start) * 1000:.1f} ms",
+        "OCR Extraction": f"{(t_ocr - t_load) * 1000:.1f} ms",
+        "Mask Generation": f"{(t_mask - t_ocr) * 1000:.1f} ms",
+        "Pixel Mapping": f"{(t_mapping - t_mask) * 1000:.1f} ms",
+        "Hotspot Detections": f"{(t_components - t_mapping) * 1000:.1f} ms",
+        "Visualisation": f"{(t_vis - t_components) * 1000:.1f} ms",
+        "Total Pipeline": f"{(t_vis - t_start) * 1000:.1f} ms"
+    }
 
     detections = len(predictions)
     labels = {"hotspot": detections} if detections > 0 else {}
@@ -328,6 +364,7 @@ def run_infrared_hybrid_detection(
             "max_temperature_read": float(temp_high),
             "max_hotspot_temperature": float(max_hotspot_temperature),
             "applied_threshold": float(alarm_temp),
+            "latency_breakdown": latency_breakdown,
         },
         "fallback": {
             "attempted": False,
