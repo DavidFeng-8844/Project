@@ -266,11 +266,13 @@ def run_infrared_hybrid_detection(
             binary[text_mask > 0] = 0
         if watermark_mask is not None and watermark_mask.any():
             binary[watermark_mask > 0] = 0
+        img_h, img_w = gray.shape
         contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        overlay = annotated.copy()
 
         for contour in contours:
             x, y, w, h = cv2.boundingRect(contour)
-            if w * h < 25:
+            if w * h < 25 or (w >= img_w * 0.4 and h >= img_h * 0.4):
                 continue
 
             x2 = x + w
@@ -286,12 +288,14 @@ def run_infrared_hybrid_detection(
                     "score": float(hotspot_temp),
                     "label": "hotspot",
                     "temperature": round(float(hotspot_temp), 2),
+                    "area_pixels": int(cv2.contourArea(contour)),
                 }
             )
 
-            cv2.rectangle(annotated, (x, y), (x2, y2), (0, 0, 255), 2)
+            cv2.rectangle(overlay, (x, y), (x2, y2), (0, 0, 255), 2)
+            cv2.fillPoly(overlay, [contour], (0, 0, 255))
             cv2.putText(
-                annotated,
+                overlay,
                 f"{hotspot_temp:.1f} C",
                 (x, max(0, y - 8)),
                 cv2.FONT_HERSHEY_SIMPLEX,
@@ -300,6 +304,8 @@ def run_infrared_hybrid_detection(
                 2,
                 cv2.LINE_AA,
             )
+
+        cv2.addWeighted(overlay, 0.45, annotated, 0.55, 0, annotated)
 
     detections = len(predictions)
     labels = {"hotspot": detections} if detections > 0 else {}

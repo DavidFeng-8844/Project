@@ -143,8 +143,13 @@ print("Running inference on validation set …")
 all_scores      = []   # confidence of every prediction
 all_bbox_ious   = []   # best IoU (bbox) of every prediction with GT
 all_mask_ious   = []   # best IoU (mask) of every prediction with GT
-all_tp_bbox     = []   # 1 if true positive (bbox IoU ≥ 0.5), else 0
-all_tp_mask     = []   # 1 if true positive (mask IoU ≥ 0.5), else 0
+# Arrays for multiple IoU thresholds: 0.50, 0.75, 0.90
+all_tp_bbox_50  = []
+all_tp_bbox_75  = []
+all_tp_bbox_90  = []
+all_tp_mask_50  = []
+all_tp_mask_75  = []
+all_tp_mask_90  = []
 total_gt_boxes  = 0    # total ground-truth objects
 
 with torch.no_grad():
@@ -181,8 +186,12 @@ with torch.no_grad():
                     all_scores.append(s)
                     all_bbox_ious.append(0.0)
                     all_mask_ious.append(0.0)
-                    all_tp_bbox.append(0)
-                    all_tp_mask.append(0)
+                    all_tp_bbox_50.append(0)
+                    all_tp_bbox_75.append(0)
+                    all_tp_bbox_90.append(0)
+                    all_tp_mask_50.append(0)
+                    all_tp_mask_75.append(0)
+                    all_tp_mask_90.append(0)
                 continue
 
             # Compute bbox IoU matrix (N_pred × N_gt)
@@ -194,12 +203,13 @@ with torch.no_grad():
                 for gi in range(n_gt):
                     mask_iou_matrix[pi, gi] = mask_iou(pred_masks[pi], gt_masks[gi])
 
-            # Greedy matching (highest IoU first)
-            matched_gt_bbox = set()
-            matched_gt_mask = set()
-
-            # Sort predictions by score descending
+            # Sort predictions by score descending for greedy matching
             order = pred_scores.argsort(descending=True)
+            
+            # We must do greedy matching INDEPENDENTLY per IoU threshold
+            matched_bbox_50 = set(); matched_bbox_75 = set(); matched_bbox_90 = set()
+            matched_mask_50 = set(); matched_mask_75 = set(); matched_mask_90 = set()
+
             for idx in order:
                 idx = idx.item()
                 score = pred_scores[idx].item()
@@ -211,29 +221,47 @@ with torch.no_grad():
                 best_mask_iou_val = best_mask_iou_val.item()
                 best_mask_gi  = best_mask_gi.item()
 
-                # bbox TP?
-                tp_b = 0
-                if best_bbox_iou >= 0.5 and best_bbox_gi not in matched_gt_bbox:
-                    tp_b = 1
-                    matched_gt_bbox.add(best_bbox_gi)
+                # Evaluate TP for BBoxes
+                tp_b_50 = 0
+                if best_bbox_iou >= 0.50 and best_bbox_gi not in matched_bbox_50:
+                    tp_b_50 = 1; matched_bbox_50.add(best_bbox_gi)
+                tp_b_75 = 0
+                if best_bbox_iou >= 0.75 and best_bbox_gi not in matched_bbox_75:
+                    tp_b_75 = 1; matched_bbox_75.add(best_bbox_gi)
+                tp_b_90 = 0
+                if best_bbox_iou >= 0.90 and best_bbox_gi not in matched_bbox_90:
+                    tp_b_90 = 1; matched_bbox_90.add(best_bbox_gi)
 
-                # mask TP?
-                tp_m = 0
-                if best_mask_iou_val >= 0.5 and best_mask_gi not in matched_gt_mask:
-                    tp_m = 1
-                    matched_gt_mask.add(best_mask_gi)
+                # Evaluate TP for Masks
+                tp_m_50 = 0
+                if best_mask_iou_val >= 0.50 and best_mask_gi not in matched_mask_50:
+                    tp_m_50 = 1; matched_mask_50.add(best_mask_gi)
+                tp_m_75 = 0
+                if best_mask_iou_val >= 0.75 and best_mask_gi not in matched_mask_75:
+                    tp_m_75 = 1; matched_mask_75.add(best_mask_gi)
+                tp_m_90 = 0
+                if best_mask_iou_val >= 0.90 and best_mask_gi not in matched_mask_90:
+                    tp_m_90 = 1; matched_mask_90.add(best_mask_gi)
 
                 all_scores.append(score)
                 all_bbox_ious.append(best_bbox_iou)
                 all_mask_ious.append(best_mask_iou_val)
-                all_tp_bbox.append(tp_b)
-                all_tp_mask.append(tp_m)
+                all_tp_bbox_50.append(tp_b_50); all_tp_bbox_75.append(tp_b_75); all_tp_bbox_90.append(tp_b_90)
+                all_tp_mask_50.append(tp_m_50); all_tp_mask_75.append(tp_m_75); all_tp_mask_90.append(tp_m_90)
 
 all_scores    = np.array(all_scores)
 all_bbox_ious = np.array(all_bbox_ious)
 all_mask_ious = np.array(all_mask_ious)
-all_tp_bbox   = np.array(all_tp_bbox)
-all_tp_mask   = np.array(all_tp_mask)
+
+all_tp_bbox_50 = np.array(all_tp_bbox_50)
+all_tp_bbox_75 = np.array(all_tp_bbox_75)
+all_tp_bbox_90 = np.array(all_tp_bbox_90)
+all_tp_mask_50 = np.array(all_tp_mask_50)
+all_tp_mask_75 = np.array(all_tp_mask_75)
+all_tp_mask_90 = np.array(all_tp_mask_90)
+
+# For threshold sweep, use 0.50 criterion as default
+all_tp_bbox = all_tp_bbox_50
 
 print(f"Total predictions: {len(all_scores)}, Total GT boxes: {total_gt_boxes}")
 
@@ -310,44 +338,56 @@ plt.close(fig)
 print(f"  ✓ {output_dir / 'loss_curves.png'}")
 
 # ══════════════════════════════════════════════
-# PLOT 2 – PR Curve (BBox, AP50)
+# PLOT 2 – PR Curve (BBox: AP50, AP75, AP90)
 # ══════════════════════════════════════════════
-print("Plotting pr_curve_bbox_ap50 …")
-prec_b, rec_b, ap50_bbox = compute_pr_curve(all_scores, all_tp_bbox, total_gt_boxes)
+print("Plotting pr_curve_bbox …")
+prec_b_50, rec_b_50, ap50_bbox = compute_pr_curve(all_scores, all_tp_bbox_50, total_gt_boxes)
+prec_b_75, rec_b_75, ap75_bbox = compute_pr_curve(all_scores, all_tp_bbox_75, total_gt_boxes)
+prec_b_90, rec_b_90, ap90_bbox = compute_pr_curve(all_scores, all_tp_bbox_90, total_gt_boxes)
 
 fig, ax = plt.subplots(figsize=(6, 5))
-ax.plot(rec_b, prec_b, color=MAIN_COLOR, linewidth=2)
-ax.fill_between(rec_b, prec_b, alpha=FILL_ALPHA, color=MAIN_COLOR)
+ax.plot(rec_b_50, prec_b_50, color=MAIN_COLOR, linewidth=2, label=f"IoU 0.50 (AP = {ap50_bbox:.3f})")
+ax.fill_between(rec_b_50, prec_b_50, alpha=0.15, color=MAIN_COLOR)
+ax.plot(rec_b_75, prec_b_75, color=SECOND_COLOR, linewidth=2, label=f"IoU 0.75 (AP = {ap75_bbox:.3f})")
+ax.plot(rec_b_90, prec_b_90, color=THIRD_COLOR, linewidth=2, linestyle="--", label=f"IoU 0.90 (AP = {ap90_bbox:.3f})")
+
 ax.set_xlabel("Recall")
 ax.set_ylabel("Precision")
-ax.set_title(f"PR Curve – BBox (AP@50 = {ap50_bbox:.3f})")
+ax.set_title("PR Curve – Bounding Box")
 ax.set_xlim([0, 1.05])
 ax.set_ylim([0, 1.05])
+ax.legend(frameon=True, loc="lower left")
 ax.grid(True, alpha=0.3)
 fig.tight_layout()
-fig.savefig(output_dir / "pr_curve_bbox_ap50.png")
+fig.savefig(output_dir / "pr_curve_bbox.png")
 plt.close(fig)
-print(f"  ✓ {output_dir / 'pr_curve_bbox_ap50.png'}")
+print(f"  ✓ {output_dir / 'pr_curve_bbox.png'}")
 
 # ══════════════════════════════════════════════
-# PLOT 3 – PR Curve (Segm / Mask, AP50)
+# PLOT 3 – PR Curve (Segm: AP50, AP75, AP90)
 # ══════════════════════════════════════════════
-print("Plotting pr_curve_segm_ap50 …")
-prec_m, rec_m, ap50_mask = compute_pr_curve(all_scores, all_tp_mask, total_gt_boxes)
+print("Plotting pr_curve_segm …")
+prec_m_50, rec_m_50, ap50_mask = compute_pr_curve(all_scores, all_tp_mask_50, total_gt_boxes)
+prec_m_75, rec_m_75, ap75_mask = compute_pr_curve(all_scores, all_tp_mask_75, total_gt_boxes)
+prec_m_90, rec_m_90, ap90_mask = compute_pr_curve(all_scores, all_tp_mask_90, total_gt_boxes)
 
 fig, ax = plt.subplots(figsize=(6, 5))
-ax.plot(rec_m, prec_m, color=THIRD_COLOR, linewidth=2)
-ax.fill_between(rec_m, prec_m, alpha=FILL_ALPHA, color=THIRD_COLOR)
+ax.plot(rec_m_50, prec_m_50, color=MAIN_COLOR, linewidth=2, label=f"IoU 0.50 (AP = {ap50_mask:.3f})")
+ax.fill_between(rec_m_50, prec_m_50, alpha=0.15, color=MAIN_COLOR)
+ax.plot(rec_m_75, prec_m_75, color=SECOND_COLOR, linewidth=2, label=f"IoU 0.75 (AP = {ap75_mask:.3f})")
+ax.plot(rec_m_90, prec_m_90, color=THIRD_COLOR, linewidth=2, linestyle="--", label=f"IoU 0.90 (AP = {ap90_mask:.3f})")
+
 ax.set_xlabel("Recall")
 ax.set_ylabel("Precision")
-ax.set_title(f"PR Curve – Segm (AP@50 = {ap50_mask:.3f})")
+ax.set_title("PR Curve – Segmentation Mask")
 ax.set_xlim([0, 1.05])
 ax.set_ylim([0, 1.05])
+ax.legend(frameon=True, loc="lower left")
 ax.grid(True, alpha=0.3)
 fig.tight_layout()
-fig.savefig(output_dir / "pr_curve_segm_ap50.png")
+fig.savefig(output_dir / "pr_curve_segm.png")
 plt.close(fig)
-print(f"  ✓ {output_dir / 'pr_curve_segm_ap50.png'}")
+print(f"  ✓ {output_dir / 'pr_curve_segm.png'}")
 
 # ══════════════════════════════════════════════
 # PLOT 4 – IoU Histogram (BBox)

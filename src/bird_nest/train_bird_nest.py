@@ -266,7 +266,8 @@ def main():
     val_dataloader = DataLoader(val_dataset, **data_loader_params)
 
     # Initialize model
-    model = maskrcnn_resnet50_fpn_v2(weights='DEFAULT')
+    # Freeze most of the backbone (trainable_backbone_layers=1) to prevent overfitting on small data
+    model = maskrcnn_resnet50_fpn_v2(weights='DEFAULT', trainable_backbone_layers=1)
 
     in_features_box = model.roi_heads.box_predictor.cls_score.in_features
     in_features_mask = model.roi_heads.mask_predictor.conv5_mask.in_channels
@@ -287,7 +288,8 @@ def main():
     checkpoint_path = checkpoint_dir / f"{model.name}.pth"
     history_path = checkpoint_dir / "history.jsonl"
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
+    # Increased weight_decay to 0.05 (default is 0.01) to heavily penalize over-parameterization
+    optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=0.05)
     lr_scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=lr,
                                                       total_steps=epochs * len(train_dataloader))
 
