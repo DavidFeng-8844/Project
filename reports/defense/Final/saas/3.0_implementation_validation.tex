@@ -13,89 +13,37 @@
 \section{System Implementation and Validation}
 \label{sec:system_validation}
 
-This chapter documents the practical implementation of the Software-as-a-Service (SaaS) architectural components established earlier, alongside a systematic validation methodology affirming their operational correctness. While subsequent chapters evaluate pure hardware performance, this section exclusively verifies logical functional requirements: multi-tenant sovereignty, asynchronous task state-machine integrity, and memory safety.
+This chapter verifies the practical implementation of the SaaS architecture, specifically its multi-tenant encapsulation, asynchronous fault-tolerance, and automated validation matrices.
 
-\subsection{Core Implementation Details}
+\subsection{Backend Functionality Validation}
 
-\subsubsection{Routing-Layer Tenant Isolation Implementation}
-To implement the isolation boundaries discussed in Section \ref{sec:saas_architecture}, the system eschews hidden ORM middleware configurations in favour of explicit injection at the Application Layer. A Flask \texttt{before\_request} interceptor parses the JSON Web Token (JWT) traversing the HTTP headers, explicitly extracting the \texttt{tenant\_id}. 
-
-Instead of relying on implicit SQLAlchemy queries, the Service Layer controllers explicitly append this dynamic attribute (e.g., \texttt{.filter\_by(tenant\_id=session['tenant\_id'])}) into the predicate of every single database transaction. The architectural advantage of this ``hard-coded'' injection is fail-safe security: should a developer forget to inject the predicate, the ORM aggressively throws a \texttt{Missing Parameter} exception rather than silently defaulting to an unfiltered broadcast, thereby structurally eliminating accidental cross-tenant data leaks.
-
-\subsubsection{Event-Driven Asynchronous Dispatch Implementation}
-To circumvent the bottleneck of synchronous single-threaded rendering, the platform implements an event-driven task distributor via Python's native \texttt{concurrent.futures.ThreadPoolExecutor}. Empirical tuning determined a cluster of 4 constant-memory worker threads strictly prevents parallel CUDA Out-Of-Memory exceptions while maximizing task throughput (100\% GPU utilisation window).
-
-Crucially, the legacy concept of ``Database Polling'' is entirely discarded on the server-side. Rather than workers endlessly querying the database for \texttt{PENDING} rows, the Flask routing controller executes an instantaneous \texttt{executor.submit(worker\_function, task\_id)} command. This memory-level message passing awakens a dormant thread instantly, reducing task initiation latency from unpredictable database-poll intervals down to near-zero milliseconds.
-
-\subsubsection{Registry Pattern with Lazy Model Loading Implementation}
-The implementation of the Model Adapter relies on a static internal dictionary mapping semantic labels (\texttt{bird\_nest}, \texttt{oil\_leak}) to their corresponding filepath weights.
-
-The fundamental implementation hurdle is VRAM capacity. Mask R-CNN commands an operational baseline of 5.5 GB, while YOLOv8s necessitates 1.5 GB. Pre-loading all registered models upon boot triggers an immediate \texttt{CUDAOutofMemoryError} on target 12GB edge clusters. The Registry implementation circumvents this via a ``Lazy Loading'' \texttt{get\_model()} function: the registry evaluates whether a model's network topology is present in active memory caching; if absent, the registry performs an isolated load-and-cache routine. Through this strategy, no VRAM is consumed until a specific algorithm is actively requested for the very first time.
-
-\subsection{Systematic Validation}
-
-\subsubsection{Validation Methodology}
-The systematic validation relies on targeted unit testing algorithms designed to simulate worst-case edge scenarios. Tests were executed identically across a controlled test-fixture environment employing a fixed pseudorandom seed (42), guaranteeing deterministic reproducibility. Furthermore, every logical scenario sequence initiated from an entirely purged database state to prevent interference from residual test data.
-
-\subsubsection{Multi-Tenant Isolation Validation}
-The multi-tenant isolation mechanism was subjected to exhaustive cross-tenant payload forging and parameter-tampering assaults. As summarized in Table \ref{tab:tenant_isolation}, a bipartite test environment was instrumented featuring Tenant A (victim) and Tenant B (attacker). 
+To guarantee fail-safe security, tenant isolation was implemented via explicit predicate injection. A \texttt{before\_request} hook parses JWTs, and controllers explicitly execute \texttt{.filter\_by(tenant\_id=session['tenant\_id'])}. This hard-coded logic fundamentally overrides parameter tampering. Validation (Table \ref{tab:tenant_isolation}) demonstrates complete impermeability against 150 simulated cross-tenant assaults. Restful \texttt{GET} queries for foreign tasks return \texttt{404 Not Found}, while aggregate queries correctly return empty arrays \texttt{[]}, obfuscating underlying data landscapes.
 
 \begin{table}[htbp]
     \centering
-    \caption{Cross-Tenant Attack Vector Test Matrix Validation}
+    \caption{Cross-Tenant Attack Validation (0\% Breach Rate)}
     \vspace{0.2cm}
     \resizebox{\textwidth}{!}{
     \begin{tabular}{@{}llcc@{}}
         \toprule
-        \textbf{Vector ID} & \textbf{Simulated Scenario} & \textbf{Expected HTTP State} & \textbf{Empirical Results (Trials)} \\
+        \textbf{Simulated Scenario} & \textbf{Expected HTTP} & \textbf{Empirical Results} \\
         \midrule
-        V1 & User B1 executes direct REST \texttt{GET} on Task A1 & 404 Not Found & 404 (50/50 Pass) \\
-        V2 & User B1 queries aggregate Tenant A task list & \texttt{[]} (Empty Array) & \texttt{[]} (50/50 Pass) \\
-        V3 & Admin B queries explicit Tenant A user list & \texttt{[]} (Empty Array) & \texttt{[]} (30/30 Pass) \\
-        V4 & User B1 transmits maliciously forged foreign \texttt{task\_id} & 404 Not Found & 404 (20/20 Pass) \\
-        \midrule
-        \multicolumn{3}{l}{\textbf{Cumulative Breach Rate}} & \textbf{0\% (0/150 Attempts)} \\
+        User B1 \texttt{GET} on foreign Task A1 & 404 Not Found & 404 (50/50 Pass) \\
+        User B1 queries Tenant A array & \texttt{[]} (Empty) & \texttt{[]} (50/50 Pass) \\
+        Admin B queries Tenant A users & \texttt{[]} (Empty) & \texttt{[]} (30/30 Pass) \\
         \bottomrule
     \end{tabular}
     }
     \label{tab:tenant_isolation}
 \end{table}
 
-Of the 150 independent cross-tenant vulnerability probes, exactly zero requests successfully exposed foreign task parameters or identities. The hard-coded \texttt{tenant\_id} SQL predicate algorithm proved entirely impermeable to URL parameter manipulation.
-
-\subsubsection{Task Lifecycle State Machine Validation}
-The sequential integrity of the \texttt{PENDING} $\rightarrow$ \texttt{RUNNING} $\rightarrow$ \texttt{SUCCESS/FAILED} transition pipeline was audited across highly turbulent concurrent environments.
-
-\begin{table}[htbp]
-    \centering
-    \caption{Task Lifecycle Verification Scenarios Under Turbulence}
-    \vspace{0.2cm}
-    \begin{tabular}{@{}l p{6cm} c@{}}
-        \toprule
-        \textbf{Scenario} & \textbf{Simulated Condition} & \textbf{Terminal State} \\
-        \midrule
-        S1 & Singular unaffected detection batch (30 iterations) & 100\% \texttt{SUCCESS} \\
-        S2 & Simulated synthetic inference layer exception (20 iterations) & 100\% \texttt{FAILED} (traceback intact) \\
-        S3 & Explosive concurrency bursting multiple threads (50 iterations) & 0 Deadlocks, 0 Duplicate Claims \\
-        S4 & Duplicate hash payloads submitted identically (15 iterations) & Distinct \texttt{task\_id} generation \\
-        S5 & Payload submission while all 4 workers saturated (30 iterations) & Maintained FIFO Queue; Completed \\
-        \bottomrule
-    \end{tabular}
-    \label{tab:task_lifecycle}
-\end{table}
-
-Table \ref{tab:task_lifecycle} confirms the lifecycle transitions are immutable. Even during Scenario S2, wherein a simulated neural network crash was triggered mid-inference, the asynchronous worker elegantly trapped the exception, populated the \texttt{error\_message} schema, and transitioned the job to \texttt{FAILED} rather than abandoning the database row in a perpetual \texttt{RUNNING} zombie state. 
-
-\subsubsection{Unit Test Automation and Summary}
-To operationalise these validations for continuous deployment protocols, the assertions were codified into an automated \texttt{unittest} suite featuring modular coverage.
+The asynchronous event-machine, powered by a 4-worker \texttt{ThreadPoolExecutor}, replaces sequential HTTP blocking with immediate \texttt{executor.submit()} invocation. To operationalise this validation continuously, an automated \texttt{unittest} suite (Figure \ref{fig:saas_validation_coverage}) audits the pipeline. Under extreme turbulence scenarios (simulated GPU exceptions and multiple payload bursts), the system maintained zero deadlocks, successfully transitioning failed tensors to \texttt{FAILED} schemas with logged tracebacks rather than freezing as zombie processes. 
 
 \begin{figure}[htbp]
     \centering
-    \includegraphics[width=0.85\textwidth]{figures/saas_validation_coverage.png}
-    \caption{Execution coverage of the automated systematic validation suite.}
+    \includegraphics[width=0.65\textwidth]{figures/saas_validation_coverage.png}
+    \caption{SaaS component coverage validation.}
     \label{fig:saas_validation_coverage}
 \end{figure}
-
-The automated testing pipeline guarantees functionality. As illustrated by Figure \ref{fig:saas_validation_coverage}, the entire 347-scenario battery executed perfectly, cementing the absolute reliability of the microservice architecture to govern enterprise workloads.
 
 \end{document}

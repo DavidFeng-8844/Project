@@ -5,7 +5,6 @@
 \usepackage{amsmath}
 \usepackage{caption}
 \usepackage{float}
-\usepackage{hyperref}
 \usepackage{geometry}
 \geometry{left=2.5cm,right=2.5cm,top=2.5cm,bottom=2.5cm}
 
@@ -14,62 +13,37 @@
 \section{SaaS Platform Architecture}
 \label{sec:saas_architecture}
 
-Beyond algorithmic accuracy, the practical deployment of power grid inspection models demands a robust infrastructure capable of sustaining concurrent user requests, maintaining responsive interaction, and ensuring strict data isolation across organisational clients. To bridge the gap between static deep learning scripts and an industrial-grade service, we conceptualised and developed a fully functional Software-as-a-Service (SaaS) platform, detailed in this section.
+To transition the deep learning models into an industrial service, a Software-as-a-Service (SaaS) platform was developed. The design strictly prioritises decoupling, multi-user concurrency, and data security.
 
-\subsection{Layered Architecture Design}
-The system adopts a highly decoupled four-tier architecture, separating visual presentation, application logic, inference orchestration, and data persistence to guarantee independent vertical scaling.
+\subsection{Architecture Overview and Data Isolation}
+The system adopts a decoupled four-tier architecture (Figure \ref{fig:saas_architecture}), isolating presentation, routing (Flask), execution (\texttt{ThreadPoolExecutor}), and relational persistence (SQLAlchemy).
 
 \begin{figure}[htbp]
     \centering
-    % \includegraphics[width=0.85\textwidth]{figures/saas_four_tier_architecture.png}
-    \caption{The four-tier layered architecture of the inspection SaaS platform.}
+    \includegraphics[width=0.7\textwidth]{figures/saas_four_tier_architecture.png}
+    \caption{Four-tier SaaS architecture.}
     \label{fig:saas_architecture}
 \end{figure}
 
-\begin{itemize}
-    \item \textbf{Presentation Layer:} Implemented as a single-page HTML/JavaScript interactive dashboard, delivering real-time UI updates and communicating with the backend exclusively via asynchronous RESTful API endpoints.
-    \item \textbf{Application Layer:} The Flask-based routing layer responsible for core Web concerns, including HTTP request handling, JWT/session authentication, payload validation, and tenant context resolution.
-    \item \textbf{Service Layer:} The abstraction core that encapsulates background task orchestration, executes the event-driven queue, accesses the model registry, and performs GPU-accelerated inference, completely isolated from HTTP blocking concerns.
-    \item \textbf{Data Layer:} Powered by SQLAlchemy ORM, managing the relational mapping of tenants, users, and historical inference tasks, enforcing row-level multi-tenant data isolation.
-\end{itemize}
-
-\subsection{Asynchronous Task Processing Design}
-\label{sec:async_design}
-Synchronous inference mechanisms strictly bind an HTTP request to the inference function's execution time. Under concurrent load, this design rapidly exhausts the finite Flask worker pool, triggering cascading HTTP 504 Gateway Timeouts. 
-
-To resolve this, the system implements an event-driven asynchronous workflow utilising a \texttt{ThreadPoolExecutor} with four constant memory workers---optimised to maximise GPU utilisation without provoking memory fault. 
+To accommodate multiple power grid subsidiaries, strict Entity-Relationship boundaries apply. Every \texttt{InferenceTask} inherits both a \texttt{user\_id} and a \texttt{tenant\_id}. Security is enforced at the routing layer via interceptors, appending \texttt{tenant\_id} filters to all queries rather than relying on implicit ORM hooks. 
 
 \begin{figure}[htbp]
     \centering
-    % \includegraphics[width=0.75\textwidth]{figures/saas_dataflow_diagram.png}
-    \caption{Asynchronous task submission, event-driven background processing, and client polling lifecycle.}
-    \label{fig:async_dataflow}
-\end{figure}
-
-The asynchronous state machine enforces a unidirectional lifecycle: \texttt{PENDING} $\rightarrow$ \texttt{RUNNING} $\rightarrow$ \texttt{SUCCESS} (or \texttt{FAILED}). 
-When a client submits an inference payload, the Application Layer immediately persists a \texttt{PENDING} metadata record and returns an HTTP 202 Accepted response containing a unique Task Identifier. Simultaneously, rather than implementing inefficient continuous database polling, the task context is passed via an in-memory queue to awaken an available background worker. The client subsequently queries the \texttt{/tasks/<id>/status} endpoint at 1.5-second polling intervals to retrieve progress and fetch the final Base64-encoded segmentation boundaries upon \texttt{SUCCESS}.
-
-\subsection{Multi-Tenant Data Isolation Design}
-
-Serving multiple distinct power grid subsidiaries on a shared physical infrastructure mandates strict cryptographic and logical boundaries to prevent unauthorised cross-tenant data leakage.
-
-\begin{figure}[htbp]
-    \centering
-    % \includegraphics[width=0.7\textwidth]{figures/saas_er_diagram.png}
-    \caption{Entity-Relationship diagram demonstrating fundamental foreign-key constraints for tenant isolation.}
+    \includegraphics[width=0.6\textwidth]{figures/saas_er_diagram.png}
+    \caption{Data isolation constraints.}
     \label{fig:saas_er}
 \end{figure}
 
-The database schema relies on an interconnected entity hierarchy. The \texttt{Tenant} master table governs organisational metadata and API quota allocations. The \texttt{User} table acts as the credential entity, assigning Role-Based Access Control (RBAC) levels (Admin vs. Standard User) and bound by a strict \texttt{tenant\_id} foreign key. Consecutively, every \texttt{InferenceTask} inherits both \texttt{tenant\_id} and \texttt{user\_id}.
+\subsection{Asynchronous Execution and Model Registry}
+Synchronous inference mechanisms exhaust Web frameworks under concurrent load. Ergo, an event-driven task pipeline (\texttt{PENDING} $\rightarrow$ \texttt{RUNNING} $\rightarrow$ \texttt{SUCCESS}) was designed. Client submissions immediately return HTTP 202, while memory queues instantaneously awaken background worker threads, eliminating database polling bottlenecks.
 
-To ensure absolute boundary sovereignty, isolation logic is structurally embedded at the Routing Layer. A Flask \texttt{before\_request} interceptor securely extracts the cryptographic session token, validates it, and injects the \texttt{tenant\_id} directly into the active request context. Consequently, every scoped SQLAlchemy database query is explicitly bound to this dynamic \texttt{tenant\_id} filter condition prior to execution. This hard-coded predicate mechanism structurally guarantees that manually forged REST queries attempting to enumerate foreign Task IDs will securely default to a \texttt{404 Not Found} response.
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.65\textwidth]{figures/saas_dataflow_diagram.png}
+    \caption{Event-driven asynchronous lifecycle.}
+    \label{fig:async_dataflow}
+\end{figure}
 
-\subsection{Model Registry Design}
-
-Accommodating the heterogeneous memory signatures of distinct deep learning paradigms (e.g., Mask R-CNN, YOLOv8) within a uniformly constrained server environment (12 GB VRAM cap) necessitates intelligent resource scaling. 
-
-The platform employs a Software Design Adapter Pattern via a centralised \textbf{Model Registry}. This decouples the REST inference pipeline from the mathematical complexity of the underlying detectors. 
-
-Crucially, the registry enforces \textit{Lazy-Loading} mechanics. During service initialisation, the system registers functional mappings for structural labels (e.g., \texttt{bird\_nest}, \texttt{oil\_leak}) but refrains from instantiating PyTorch weight tensors into GPU memory. Allocation is deferred strictly until the precise moment the first request for a specific algorithm is intercepted. This dramatically mitigates startup Out-of-Memory (OOM) crashes and prevents resource starvation. Future extensions scaling to supplementary grid defects (e.g., insulator cracking) require zero architectural revisions---developers simply append an independent mapping script to the static registry dictionary.
+Additionally, to prevent 12 GB hardware resource exhaustion from simultaneously loading YOLOv8s and Mask R-CNN, an Adapter Pattern Model Registry defers memory allocation. Weights are exclusively \textit{lazy-loaded} upon their first explicit invocation and cached thereafter.
 
 \end{document}

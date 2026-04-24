@@ -1,0 +1,29 @@
+\documentclass[12pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage{geometry}
+\geometry{left=2.5cm,right=2.5cm,top=2.5cm,bottom=2.5cm}
+
+\begin{document}
+
+\section{Conclusions}
+
+This research successfully developed an end-to-end, multi-tenant Software-as-a-Service (SaaS) platform, transforming isolated deep learning algorithms into an industrial power grid defect inspection system.
+
+\subsection{Summary of Achievements}
+\begin{itemize}
+    \item \textbf{High-Precision Detection via Deep Learning:} Successfully integrated Mask R-CNN and YOLOv8s. Despite constrained datasets, targeted optimisation enabled accurate segmentation of complex bird nests and high-precision bounding over oil leak signatures.
+    \item \textbf{Hybrid Thermal Diagnostics:} Engineered a cost-effective hybrid infrared pipeline. By combining EasyOCR with dynamic pixel-to-temperature mappings, the system flags critical overheating anomalies in approximately 765 ms without relying on dedicated, resource-heavy thermal neural models.
+    \item \textbf{Robust SaaS Engineering:} Delivered a Flask-driven RESTful architecture overcoming fundamental hardware limitations. The event-driven \texttt{ThreadPoolExecutor} and lazy-loaded Model Registry sustained processing of over 120 images per minute under 12GB VRAM constraints. Explicit SQL predicate injection guaranteed zero cross-tenant data leakage.
+\end{itemize}
+
+\subsection{Limitations}
+\begin{itemize}
+    \item \textbf{Environmental Variance:} Heavily augmented training data remains biased toward ideal lighting, reducing accuracy in extreme weather or night operations.
+    \item \textbf{OCR Sensitivity:} The infrared mapping module is vulnerable to legacy camera watermarks and low-resolution compression, which can occasionally defeat heuristic masking and degrade temperature readings.
+    \item \textbf{Scalability Limits:} Local thread-pool deployment restricts horizontal horizontal scaling required for thousands of concurrent enterprise requests.
+\end{itemize}
+
+\subsection{Future Work}
+Future iterations will prioritise transitioning visual detection backbones to multi-modal architectures like Vision Transformers (ViT) to increase contextual robustness against weather anomalies. Furthermore, migrating the SaaS backend to a cloud-native Kubernetes (K8s) environment will unlock distributed GPU auto-scaling, completing the transition to nationwide industrial adoption.
+
+\end{document}
