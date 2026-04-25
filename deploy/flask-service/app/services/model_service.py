@@ -190,14 +190,15 @@ def _build_border_watermark_mask(image_bgr: np.ndarray) -> np.ndarray:
     h, w = image_bgr.shape[:2]
     mask = np.zeros((h, w), dtype=np.uint8)
     hsv = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2HSV)
-    # White-ish overlay: high brightness + low saturation.
-    candidate = cv2.inRange(hsv, (0, 0, 205), (180, 70, 255))
+    # White-ish or greyish overlay: high brightness + low/medium saturation.
+    candidate = cv2.inRange(hsv, (0, 0, 150), (180, 90, 255))
 
-    k = max(3, int(round(min(h, w) * 0.01)))
+    k = max(3, int(round(min(h, w) * 0.015)))
     if k % 2 == 0:
         k += 1
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (k, k))
-    candidate = cv2.morphologyEx(candidate, cv2.MORPH_CLOSE, kernel, iterations=1)
+    # Use a larger closing kernel to bridge gaps between text characters
+    candidate = cv2.morphologyEx(candidate, cv2.MORPH_CLOSE, kernel, iterations=2)
     candidate = cv2.morphologyEx(candidate, cv2.MORPH_OPEN, kernel, iterations=1)
 
     contours, _ = cv2.findContours(candidate, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -229,6 +230,17 @@ def _build_border_watermark_mask(image_bgr: np.ndarray) -> np.ndarray:
         x2g = min(w - 1, x + cw + pad_x)
         y2g = min(h - 1, y + ch + pad_y)
         mask[y1g:y2g + 1, x1g:x2g + 1] = 255
+
+    # Forcefully mask out the bottom-left corner (commonly contains camera model, FLIR logo, or timestamp)
+    # Occupies bottom 12% and left 35% of the image.
+    bl_h = int(h * 0.12)
+    bl_w = int(w * 0.35)
+    mask[h - bl_h:h, 0:bl_w] = 255
+
+    # Also force mask bottom-right if not covered by legend (often has secondary logos)
+    br_h = int(h * 0.08)
+    br_w = int(w * 0.20)
+    mask[h - br_h:h, w - br_w:w] = 255
 
     return mask
 

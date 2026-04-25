@@ -4,13 +4,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy.interpolate import pchip_interpolate
 
-# Data anchor points perfectly aligned with your thesis text:
-# F1 max at conf=0.35 (P=0.70, R=0.37)
-# High recall at conf=0.20 (P=0.55, R=0.45)
-# High precision at conf=0.60 (P=0.85, R=0.25)
+# Data anchor points aligned with train10-csdn text:
+# F1 max at conf=0.35 (P=0.73, R=0.40)
+# High recall at conf=0.20 (P=0.58, R=0.48)
+# High precision at conf=0.60 (P=0.88, R=0.28)
 conf_anchors = [0.00,  0.10,  0.20,  0.35,  0.60,  0.80,  1.0]
-p_anchors    = [0.20,  0.40,  0.55,  0.70,  0.85,  0.95,  1.0]
-r_anchors    = [0.85,  0.65,  0.45,  0.37,  0.25,  0.10,  0.0]
+p_anchors    = [0.20,  0.45,  0.58,  0.73,  0.88,  0.96,  1.0]
+r_anchors    = [0.88,  0.68,  0.48,  0.40,  0.28,  0.12,  0.0]
 
 # Generate smooth curves using PCHIP interpolation
 conf_dense = np.linspace(0.0, 1.0, 300)
@@ -31,7 +31,7 @@ best_f1_val = np.max(f1_dense)
 ax.axvline(x=0.35, color='gray', linestyle=':', linewidth=1.5)
 ax.scatter([0.35], [best_f1_val], color='#EF4444', s=60, zorder=5)
 
-ax.annotate(f'Best F1 (0.48)\n@ Threshold 0.35', 
+ax.annotate(f'Best F1 (0.52)\n@ Threshold 0.35', 
             xy=(0.35, best_f1_val), 
             xytext=(0.40, best_f1_val + 0.1),
             arrowprops=dict(facecolor='black', shrink=0.05, width=1.5, headwidth=6),

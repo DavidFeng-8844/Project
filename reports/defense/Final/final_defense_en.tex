@@ -127,13 +127,13 @@ While deep learning algorithms for power grid inspection achieve high theoretica
 \textbf{Small-Dataset Optimization}
 \begin{itemize}
     \item Base: ResNet50 + FPNv2
-    \item Training size: $\sim$50 COCO images
+    \item Training size: 124 images
     \item Employed strong deterministic augmentations (Random IoU Crop, Jitter) to prevent generative artifacts.
 \end{itemize}
 \vspace{0.3cm}
 \textbf{Result Metrics}
 \begin{itemize}
-    \item \textbf{AP50 (Bbox \& Seg):} 1.000
+    \item \textbf{AP50 (Bbox):} 0.907
     \item Threshold 0.4--0.5 yields optimal F1 trade-off.
 \end{itemize}
 \column{0.5\linewidth}
@@ -151,7 +151,7 @@ While deep learning algorithms for power grid inspection achieve high theoretica
 \column{0.45\linewidth}
 \textbf{Dataset Expansion (Post-Midterm)}
 \begin{itemize}
-    \item Upgraded dataset by merging \textbf{VOC + CSDN}.
+    \item Upgraded dataset to \textbf{333 images} (merged VOC + CSDN).
     \item Addressed midterm critique regarding low recall rates.
 \end{itemize}
 \vspace{0.3cm}
