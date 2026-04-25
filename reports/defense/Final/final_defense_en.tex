@@ -1,0 +1,331 @@
+\documentclass[aspectratio=169]{beamer}
+\usetheme{Madrid}
+\setbeamertemplate{navigation symbols}{}
+\usecolortheme{default}
+\usepackage{graphicx}
+\usepackage{caption}
+\usepackage{booktabs}
+\usepackage{tikz}
+
+% Ensure content doesn't overlap with bottom title bar
+\setbeamersize{text margin left=0.5cm,text margin right=0.5cm}
+
+\title[AI-based Inspection SaaS Platform]{AI-based Damage Detection for Power Grid Equipment\\with SaaS-oriented Design}
+\subtitle{Final Defense}
+\author{Yujie Feng}
+\institute[Leeds]{Supervisor: Jin Hou}
+\date{\today}
+
+% Customize footline
+\setbeamertemplate{footline}
+{
+  \leavevmode%
+  \hbox{%
+  \begin{beamercolorbox}[wd=0.3\paperwidth,ht=2.25ex,dp=1ex,left]{author in head/foot}%
+    \usebeamerfont{author in head/foot}\hspace*{2ex}\insertshortauthor
+  \end{beamercolorbox}%
+  \begin{beamercolorbox}[wd=0.5\paperwidth,ht=2.25ex,dp=1ex,center]{title in head/foot}%
+    \usebeamerfont{title in head/foot}\insertshorttitle
+  \end{beamercolorbox}%
+  \begin{beamercolorbox}[wd=0.2\paperwidth,ht=2.25ex,dp=1ex,right]{date in head/foot}%
+    \usebeamerfont{date in head/foot}\insertframenumber{} / \inserttotalframenumber\hspace*{2ex}
+  \end{beamercolorbox}%
+  }%
+  \vskip0pt%
+}
+
+\begin{document}
+
+%------------------------------------------------
+\begin{frame}
+  \titlepage
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}
+\frametitle{Outline}
+\begin{columns}[T]
+\column{0.48\linewidth}
+\textbf{Part 1: Background \& Architecture}
+\begin{enumerate}
+  \item Project Background \& Motivation
+  \item Four-Tier SaaS Architecture
+\end{enumerate}
+\vspace{0.3cm}
+\textbf{Part 2: Core AI Modules}
+\begin{enumerate}
+  \setcounter{enumi}{2}
+  \item Module A: Bird Nest (Mask R-CNN)
+  \item Module B: Oil Leak (YOLOv8s)
+  \item Module C: Infrared Hybrid (EasyOCR)
+\end{enumerate}
+
+\column{0.48\linewidth}
+\textbf{Part 3: SaaS System Engineering}
+\begin{enumerate}
+  \setcounter{enumi}{5}
+  \item Innovation 1: Async Event-Driven Dispatch
+  \item Innovation 2: Lazy-Load Model Registry
+  \item System Security \& Validation
+\end{enumerate}
+\vspace{0.3cm}
+\textbf{Part 4: Conclusion}
+\begin{enumerate}
+  \setcounter{enumi}{8}
+  \item System UI Demonstration
+  \item Conclusion \& Future Work
+\end{enumerate}
+\end{columns}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}
+\frametitle{1. Background \& Motivation}
+\begin{block}{The Industry Gap}
+While deep learning algorithms for power grid inspection achieve high theoretical accuracy, transitioning them from \textbf{isolated Python scripts} to \textbf{multi-tenant industrial deployments} remains a critical engineering bottleneck.
+\end{block}
+\vspace{0.3cm}
+\begin{columns}[T]
+\column{0.48\linewidth}
+\textbf{Challenges Overcome:}
+\begin{itemize}
+    \item \textbf{Data Constraints:} Optimizing models on extremely small, highly biased datasets.
+    \item \textbf{Hardware Constraints:} Serving multiple heavy DL models concurrently under strict edge VRAM limits (12GB).
+\end{itemize}
+\column{0.48\linewidth}
+\textbf{Project Deliverables:}
+\begin{itemize}
+    \item 3 High-accuracy detection modules (RGB \& Infrared).
+    \item A fully decoupled, multi-tenant Flask SaaS platform.
+    \item Zero-latency asynchronous task queue architecture.
+\end{itemize}
+\end{columns}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}
+\frametitle{2. Four-Tier SaaS Architecture}
+\begin{columns}[c]
+\column{0.45\linewidth}
+\begin{itemize}
+    \item \textbf{Presentation:} Interactive JS Dashboard (Vue/Bootstrap).
+    \item \textbf{Application (Flask):} API Gateway, JWT Auth, Tenant Resolution.
+    \item \textbf{Service (Workers):} ThreadPoolExecutor \& PyTorch Registry.
+    \item \textbf{Data (SQLAlchemy):} Strict Multi-tenant isolation.
+\end{itemize}
+\column{0.5\linewidth}
+\centering
+\includegraphics[width=0.95\textwidth]{saas/figures/saas_four_tier_architecture.png}
+\end{columns}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}
+\frametitle{3. Module A: Bird Nest Detection (Mask R-CNN)}
+\begin{columns}[T]
+\column{0.45\linewidth}
+\textbf{Small-Dataset Optimization}
+\begin{itemize}
+    \item Base: ResNet50 + FPNv2
+    \item Training size: $\sim$50 COCO images
+    \item Employed strong deterministic augmentations (Random IoU Crop, Jitter) to prevent generative artifacts.
+\end{itemize}
+\vspace{0.3cm}
+\textbf{Result Metrics}
+\begin{itemize}
+    \item \textbf{AP50 (Bbox \& Seg):} 1.000
+    \item Threshold 0.4--0.5 yields optimal F1 trade-off.
+\end{itemize}
+\column{0.5\linewidth}
+\centering
+\includegraphics[width=0.85\textwidth]{../../../experiments/visualizations/loss_curves.png}
+\vspace{0.2cm}
+\textit{Plateaus at Epoch 20 - No Overfitting.}
+\end{columns}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}
+\frametitle{4. Module B: Oil Leak Detection (YOLOv8s)}
+\begin{columns}[T]
+\column{0.45\linewidth}
+\textbf{Dataset Expansion (Post-Midterm)}
+\begin{itemize}
+    \item Upgraded dataset by merging \textbf{VOC + CSDN}.
+    \item Addressed midterm critique regarding low recall rates.
+\end{itemize}
+\vspace{0.3cm}
+\textbf{Training Dynamics}
+\begin{itemize}
+    \item YOLOv8s single-class detection.
+    \item AdamW + Cosine LR + Mosaic (0.3).
+    \item Box-level detection perfectly isolates equipment leakage zones.
+\end{itemize}
+\column{0.5\linewidth}
+\centering
+\includegraphics[width=0.85\textwidth]{../../../src/oil_leak/runs/detect/train10-csdn/confusion_matrix_normalized.png}
+\vspace{0.2cm}
+\textit{Demonstrating significant drop in False Positives.}
+\end{columns}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}
+\frametitle{5. Module C: Infrared Hybrid Innovation}
+\begin{columns}[T]
+\column{0.45\linewidth}
+\textbf{Methodological Innovation}
+\begin{itemize}
+    \item \textit{Problem:} True thermal segmentation requires massive datasets and thermal tensors.
+    \item \textit{Solution:} An OCR-based hybrid pipeline parsing standard JPGs.
+\end{itemize}
+\vspace{0.3cm}
+\textbf{Heuristic Pipeline}
+\begin{itemize}
+    \item EasyOCR extracts Legend Scale.
+    \item Masking algorithms suppress UI Watermarks.
+    \item Dynamic Pixel-to-Temperature algorithm maps the bounding boxes mathematically.
+\end{itemize}
+\column{0.5\linewidth}
+\centering
+\includegraphics[width=0.85\textwidth]{../../assets/InfraredHighTempDetection.png}
+\end{columns}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}
+\frametitle{6. Module C: Latency Breakdown Analysis}
+\textbf{Empirical Hardware Latency Decomposition (Per Image)}
+\vspace{0.3cm}
+\begin{center}
+\begin{tabular}{lcc}
+\toprule
+\textbf{Operation Stage} & \textbf{Time (ms)} & \textbf{Proportion} \\
+\midrule
+Image Decoding \& Matrix I/O & $\sim$ 15 ms & 2\% \\
+\textbf{OCR Temp Extraction (EasyOCR)} & $\sim$ \textbf{520 ms} & \textbf{68\%} \\
+\textbf{Algorithmic Pixel Mapping} & $\sim$ \textbf{80 ms} & \textbf{10\%} \\
+Topological Hotspot Tracking & $\sim$ 50 ms & 7\% \\
+Mask I/O Generation & $\sim$ 70 ms & 9\% \\
+\midrule
+\textbf{Total Pipeline Delay} & \textbf{$\sim$ 765 ms} & \textbf{100\%} \\
+\bottomrule
+\end{tabular}
+\end{center}
+\vspace{0.3cm}
+\textit{Conclusion:} CPU-based OCR dictates 68\% of latency. However, the core algorithmic innovation (Pixel Mapping) requires only \textbf{80ms}, proving immense mathematical efficiency over deep CNNs.
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}
+\frametitle{7. SaaS Innovation 1: Async Event-Driven Dispatch}
+\begin{columns}[T]
+\column{0.45\linewidth}
+\textbf{Synchronous vs. Asynchronous}
+\begin{itemize}
+    \item \textbf{Sync:} Blocks the thread. 20 concurrent users = cascading 504 Gateway Timeouts.
+    \item \textbf{Async:} \texttt{ThreadPoolExecutor} instantly assigns tasks to memory queue.
+\end{itemize}
+\vspace{0.3cm}
+\textbf{Evaluation Results}
+\begin{itemize}
+    \item Client receives HTTP 202 in \textbf{$<$68ms}.
+    \item Hardware achieves sustained throughput of \textbf{124 images/min}.
+\end{itemize}
+\column{0.5\linewidth}
+\centering
+\includegraphics[width=0.9\textwidth]{saas/figures/plot_async_vs_sync.png}
+\end{columns}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}
+\frametitle{8. SaaS Innovation 2: Lazy-Load Model Registry}
+\begin{columns}[T]
+\column{0.45\linewidth}
+\textbf{Target Environment Limits}
+\begin{itemize}
+    \item Edge Node VRAM ceiling: 12GB.
+    \item Mask R-CNN (5.5GB) + YOLOv8s (1.5GB) loaded globally causes startup Out-of-Memory (OOM).
+\end{itemize}
+\vspace{0.3cm}
+\textbf{Registry Pattern}
+\begin{itemize}
+    \item Weights are \textit{only} loaded upon absolute first invocation.
+    \item Memory flatlines securely at \textbf{7.4GB}.
+    \item Zero memory leakage observed over extended stress testing.
+\end{itemize}
+\column{0.5\linewidth}
+\centering
+\includegraphics[width=0.9\textwidth]{saas/figures/plot_memory_stability.png}
+\end{columns}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}
+\frametitle{9. System Security \& Automated Validation}
+\begin{columns}[T]
+\column{0.45\linewidth}
+\textbf{Zero-Trust Tenant Isolation}
+\begin{itemize}
+    \item Eschewed implicit ORM hooks.
+    \item Explicit predicate injection at routing layer: \texttt{.filter\_by(tenant\_id=jwt)}
+\end{itemize}
+\vspace{0.3cm}
+\textbf{Empirical Attack Matrix}
+\begin{itemize}
+    \item 150 simulated cross-tenant assaults (forged IDs, aggregate enumeration).
+    \item Result: \textbf{0\% Data Leakage}. Responses mathematically forced to 404 or \texttt{[]}.
+\end{itemize}
+\column{0.5\linewidth}
+\centering
+\includegraphics[width=0.85\textwidth]{saas/figures/saas_validation_coverage.png}
+\vspace{0.2cm}
+\textit{Automated Unittest Coverage spanning state-machines and API boundaries.}
+\end{columns}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}
+\frametitle{10. Full System UI Demonstration}
+\begin{columns}[T]
+\column{0.48\linewidth}
+\centering
+\includegraphics[width=0.9\textwidth]{../../assets/MainPage.png}
+\captionof{figure}{Main SaaS Workspace}
+
+\column{0.48\linewidth}
+\centering
+\includegraphics[width=0.9\textwidth]{../../assets/HistroyPage.png}
+\captionof{figure}{Batch Processing \& History Analytics}
+\end{columns}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}
+\frametitle{11. Conclusion \& Future Work}
+\begin{block}{Summary of Achievements}
+\begin{itemize}
+    \item Bridged the gap between AI algorithms and enterprise operations.
+    \item Deployed 3 highly accurate computer vision pipelines despite data constraints.
+    \item Engineered a zero-latency, memory-safe, multi-tenant Flask architecture resolving severe OOM and concurrency failures.
+\end{itemize}
+\end{block}
+\vspace{0.2cm}
+\begin{block}{Future Work}
+\begin{itemize}
+    \item \textbf{Algorithmic:} Transition to multi-modal architectures (e.g., Vision Transformers) to handle extreme weather degradation.
+    \item \textbf{Engineering:} Migrate from local ThreadPools to cloud-native Kubernetes (K8s) for distributed GPU auto-scaling.
+\end{itemize}
+\end{block}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}
+\centering
+\Huge \textbf{Thank You!}\\
+\vspace{0.5cm}
+\Large Q \& A
+\end{frame}
+
+\end{document}
